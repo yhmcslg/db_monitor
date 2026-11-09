@@ -1,0 +1,21 @@
+# 本地配置文件，含账号密码，别提交
+config.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Playwright 登录 cookie
+.playwright_state.json
+
+# PyCharm / VSCode / macOS
+.idea/
+.vscode/
+.DS_Store
+
+# 临时文件
+promql.yaml
