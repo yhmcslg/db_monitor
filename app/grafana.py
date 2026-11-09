@@ -93,12 +93,20 @@ def _url_for(info: SchemaInfo) -> str:
         })
 
     if t == "ali_polardb":
+        # 调阿里云 Open API 查该集群的 Writer 节点 ID；查不到就用 All
+        node_id = "All"
+        if info.name:
+            try:
+                from .aliyun import get_polardb_writer_node_id
+                node_id = get_polardb_writer_node_id(info.name) or "All"
+            except Exception:  # noqa: BLE001
+                pass
         return _build_url(uids["ali_polardb"], {
             "var-RegionId": "All",
             "var-DBType":   "MySQL",
             "var-DBClusterDescription": info.name or "All",
             "var-DBNodeRole": "Writer",
-            "var-nodeId":   "All",
+            "var-nodeId":   node_id,
         })
 
     if t == "ali_ecs":
@@ -115,13 +123,22 @@ def _url_for(info: SchemaInfo) -> str:
         })
 
     if t == "hw_taurusdb":
+        # 节点名约定为 <实例名>_node01
+        node_name = f"{info.name}_node01" if info.name else "All"
+        # 调华为云 Open API 查 Master 节点 ID（Grafana var-gaussdb_mysql_node_id 必须具体值）
+        node_id = "All"
+        if info.name:
+            try:
+                from .huaweicloud import get_taurusdb_master_node_id
+                node_id = get_taurusdb_master_node_id(info.name) or "All"
+            except Exception:  # noqa: BLE001
+                pass
         return _build_url(uids["hw_taurusdb"], {
-            # 华为 TaurusDB 面板用 Prometheus-JVM 数据源
             "var-datasource": "Prometheus-JVM",
             "var-instance_name":       info.name or "All",
             "var-gaussdb_mysql_instance_id": "All",
-            "var-node_name":           "All",
-            "var-gaussdb_mysql_node_id": "All",
+            "var-node_name":           node_name,
+            "var-gaussdb_mysql_node_id": node_id,
         })
 
     if t == "hw_rds":

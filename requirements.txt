@@ -11,3 +11,6 @@ pillow==10.4.0
 # Aliyun PolarDB SDK - lookup writer nodeId by cluster description
 alibabacloud_polardb20170801==5.1.0
 alibabacloud_tea_openapi==0.3.11
+# Huawei Cloud GaussDB(for MySQL)/TaurusDB SDK - lookup master node id
+huaweicloudsdkcore==3.1.111
+huaweicloudsdkgaussdb==3.1.111

@@ -428,11 +428,20 @@ def _panel_vars(info: SchemaInfo) -> dict[str, str]:
             "var-PublicIpAddress": "All", "var-InstanceName": "All", "var-instanceId": "All",
         }
     if t == "hw_taurusdb":
+        node_name = f"{info.name}_node01" if info.name else "All"
+        node_id = "All"
+        if info.name:
+            try:
+                from .huaweicloud import get_taurusdb_master_node_id
+                node_id = get_taurusdb_master_node_id(info.name) or "All"
+            except Exception:  # noqa: BLE001
+                pass
         return {
             "var-datasource": "Prometheus-JVM",
             "var-instance_name": info.name or "All",
             "var-gaussdb_mysql_instance_id": "All",
-            "var-node_name": "All", "var-gaussdb_mysql_node_id": "All",
+            "var-node_name": node_name,
+            "var-gaussdb_mysql_node_id": node_id,
         }
     if t == "hw_rds":
         return {
