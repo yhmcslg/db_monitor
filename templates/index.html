@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>db_monitor - 租户监控链接查询</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           max-width: 980px; margin: 32px auto; padding: 0 20px; color: #222; }
+    h1 { margin-top: 0; }
+    form { margin: 16px 0 24px; display: flex; gap: 8px; }
+    input[type=text] { flex: 1; padding: 8px 12px; font-size: 16px;
+                       border: 1px solid #ccc; border-radius: 6px; }
+    button { padding: 8px 16px; font-size: 16px; background: #2563eb;
+             color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 12px 0; }
+    .card h3 { margin: 0 0 8px; }
+    .note { color: #047857; font-size: 13px; margin: 6px 0; }
+    .err { color: #b91c1c; background: #fee2e2; padding: 10px 14px; border-radius: 6px; }
+    .warn { color: #92400e; background: #fef3c7; padding: 10px 14px; border-radius: 6px;
+            margin: 10px 0; font-size: 14px; }
+    .tag { display: inline-block; background: #eef2ff; color: #4338ca;
+           border-radius: 4px; padding: 1px 8px; margin-right: 6px; font-size: 12px; }
+    a.link { word-break: break-all; }
+    details { margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+    th { background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <h1>租户监控链接查询</h1>
+  <form action="/" method="get">
+    <input type="text" name="tenant" value="{{ tenant }}" placeholder="输入租户代码，如 geely" autofocus />
+    <button type="submit">查询</button>
+  </form>
+
+  {% if error %}
+    <div class="err">出错：{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    <div class="card">
+      <h3>租户：{{ result.tenant }}</h3>
+      <div>将查询以下 4 个业务库：</div>
+      <div style="margin-top:6px">
+        {% for label in result.schema_labels %}
+          <span class="tag">{{ label }}（{{ result.schemas[loop.index0] }}）</span>
+        {% endfor %}
+      </div>
+      {% if result.missing_schemas %}
+        <div class="warn">
+          以下库在 devops.info 中未找到：
+          {% for s in result.missing_schemas %}<span class="tag">{{ s }}</span>{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    <h2>Grafana 监控</h2>
+    {% if result.grafana %}
+      {% for g in result.grafana %}
+        <div class="card">
+          <h3>{{ g.instance_label }} <span class="tag">{{ g.instance_type }}</span></h3>
+          {% if g.schema_labels | length == result.schema_labels | length %}
+            <div class="note">4 个业务库都在这个实例上</div>
+          {% elif g.schema_labels | length > 1 %}
+            <div class="note">以下 {{ g.schema_labels | length }} 个库在这个实例上：{{ g.schema_labels | join('、') }}</div>
+          {% endif %}
+          <div>库：{% for label in g.schema_labels %}<span class="tag">{{ label }}</span>{% endfor %}</div>
+          <div style="margin-top:8px"><a class="link" href="{{ g.url }}" target="_blank">{{ g.url }}</a></div>
+          {% if result.screenshot_enabled %}
+            <div style="margin-top:12px; border:1px solid #e5e7eb; border-radius:6px; overflow:hidden">
+              <img loading="lazy"
+                   src="/api/screenshot?tenant={{ result.tenant }}&key={{ g.screenshot_key | urlencode }}"
+                   alt="监控截图加载中..."
+                   style="display:block; width:100%; background:#f9fafb"
+                   onerror="this.alt='截图失败（Playwright 可能没装、未安装 Chromium、或登录失败）'; this.style.minHeight='60px'" />
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="warn">未生成 Grafana 链接（info 表没有匹配记录）</div>
+    {% endif %}
+
+    <h2>ELK 慢 SQL</h2>
+    <div class="card">
+      {% if result.elk.error %}
+        <div class="warn">{{ result.elk.error }}</div>
+      {% endif %}
+      <a class="link" href="{{ result.elk.url }}" target="_blank">{{ result.elk.url }}</a>
+    </div>
+
+    <details>
+      <summary>查询到的原始实例信息（点开查看）</summary>
+      <table>
+        <tr>
+          <th>schemaname</th><th>product</th><th>env</th><th>datacenter</th>
+          <th>内网IP:端口</th><th>外网IP:端口</th><th>name</th><th>识别类型</th>
+        </tr>
+        {% for i in result.instances %}
+          <tr>
+            <td>{{ i.schemaname }}</td><td>{{ i.product }}</td><td>{{ i.env }}</td>
+            <td>{{ i.datacenter }}</td>
+            <td>{{ i.serverinnerip }}:{{ i.serverport }}</td>
+            <td>{{ i.serverouterip }}:{{ i.serverouterport }}</td>
+            <td>{{ i.name }}</td><td>{{ i.instance_type }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    </details>
+  {% endif %}
+
+  <p style="margin-top:32px; color:#6b7280; font-size:12px">
+    另可直接 GET <code>/api/lookup?tenant=geely</code> 拿 JSON 结果。
+  </p>
+</body>
+</html>

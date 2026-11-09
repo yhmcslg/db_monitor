@@ -1,0 +1,115 @@
+# ========= MySQL（devops 元数据库） =========
+mysql:
+  host: 10.1.50.10
+  port: 3306
+  user: gaia
+  password: "Gaia@1234"
+  database: devops
+  # {schemas} 会被替换为逗号分隔的 4 个库名的带引号列表
+  # 两表 join：tenant_info.schemaname → instance_info，按 number 关联
+  query_sql: >
+    SELECT t.schemaname, t.product,
+           i.env, i.serverinnerip, i.serverport,
+           i.serverouterip, i.serverouterport,
+           i.name, i.datacenter, i.instance_type
+    FROM tenant_info t
+    JOIN instance_info i ON t.number = i.number
+    WHERE t.schemaname IN ({schemas})
+
+# ========= Grafana =========
+grafana:
+  base: https://monitor.gaiaworkforce.com
+  username: jerry.yan
+  password: Gaia%1234
+  # 默认时间窗（最近 1 小时）
+  default_from: now-1h
+  default_to: now
+  # 各类面板 uid
+  dashboards:
+    ali_ecs:       R6xg1AkGk   # 阿里云 ECS 监控
+    ali_rds:       yl8PwrzMk   # 阿里云 RDS 监控
+    ali_polardb:   TTvuGPaSz   # 阿里云 PolarDB MySQL 监控
+    hw_ecs:        YsreRunGz   # 华为云 ECS 监控
+    hw_rds:        VfbmJbgnk   # 华为云 RDS 监控
+    hw_taurusdb:   hnwDKXYIz   # 华为云 GaussDB(for MySQL) 监控
+
+  # 各面板里要截的 panel：显示名 -> panelId
+  # 顺序就是截图纵向拼接顺序
+  panels:
+    ali_ecs:
+      CPU: 10
+      内存: 23
+      磁盘IOPS: 6
+      磁盘吞吐量: 5
+    ali_rds:
+      CPU: 29
+      内存: 34
+      IOPS: 26
+    ali_polardb:
+      CPU: 29
+      内存: 34
+      PCU个数: 39
+    hw_ecs:
+      CPU: 10
+      内存: 16
+      磁盘IOPS: 24
+      磁盘吞吐量: 23
+    hw_rds:
+      CPU: 10
+      内存: 16
+      磁盘IOPS: 22
+    hw_taurusdb:
+      CPU: 43
+      内存: 10
+      磁盘IOPS: 22
+      磁盘吞吐量: 35
+
+# ========= Grafana 截图（Playwright） =========
+screenshot:
+  enabled: true
+  # 单个 panel 截图尺寸（像素）
+  panel_width: 900
+  panel_height: 300
+  # 最多等 Grafana 面板渲染多少秒
+  render_timeout_sec: 20
+  # cookie 持久化路径，登录态会保存到这里；首次无文件时自动走表单登录
+  storage_state_path: .playwright_state.json
+  # Chromium 无头模式
+  headless: true
+  # 本机内存缓存：同一 (tenant, instance_key) 多少秒内复用 PNG
+  cache_ttl_sec: 60
+
+# ========= Kibana / ELK =========
+kibana:
+  base: https://elk-p.gaiaworks.cn
+  # Discover 使用的 index pattern id
+  index_pattern: c5f89b60-c3d7-11e9-9662-eb9202da844d
+  default_from: now-1h
+  default_to: now
+  # 短链 API 需要账号密码；留空则直接返回长链
+  username: "jerry.yan"
+  password: "Gaia%1234"
+  # 请求头，大多数部署需要 kbn-xsrf
+  verify_ssl: true
+
+# ========= Web 服务 =========
+server:
+  host: 0.0.0.0
+  port: 8000
+
+# ========= 租户 -> 4 个库的推导规则 =========
+# {code} 会被替换为租户代码
+# 顺序：考勤 / 排班 / 新人事 / 计算累计（与 schema_labels 对应）
+schemas:
+  - "{code}"
+  - "schedule_{code}"
+  - "corehr_{code}"
+  - "gaia_acc_{code}"
+
+# 每个库在网页和截图里显示的业务名
+# key 是 schemas 里的模板；value 是展示名
+schema_labels:
+  "{code}": "考勤"
+  "schedule_{code}": "排班"
+  "corehr_{code}": "新人事"
+  "gaia_acc_{code}": "计算累计"
