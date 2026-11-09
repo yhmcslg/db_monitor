@@ -67,6 +67,10 @@ async def render_instance_png(tenant: str, link: GrafanaLink, infos: list[Schema
     # 4. 组装每个 panel 的 d-solo URL
     uid = get_config()["grafana"]["dashboards"][rep.instance_type]
     base_vars = _panel_vars(rep)
+
+    # 对 PolarDB / TaurusDB 这种 nodeId 必须具体值的面板，先 probe 真实 nodeId
+    base_vars = await _resolve_node_id(uid, base_vars, rep.instance_type)
+
     panel_items: list[tuple[str, str]] = []  # [(标题, URL)]
     for display, panel_id in panels_cfg.items():
         url = _solo_url(uid, panel_id, base_vars)
@@ -89,7 +93,17 @@ async def _get_browser():
         if _browser is None:
             from playwright.async_api import async_playwright
             _playwright = await async_playwright().start()
-            _browser = await _playwright.chromium.launch(headless=get_config()["screenshot"]["headless"])
+            cfg_s = get_config()["screenshot"]
+            launch_args = {
+                "headless": cfg_s["headless"],
+                # 关掉沙箱，Windows 服务器 / Docker 常见，避免 spawn UNKNOWN
+                "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+            }
+            # 可选：指定用系统 Chrome / Edge（当 bundled chromium 被杀软拦截时很有用）
+            channel = cfg_s.get("channel")
+            if channel:
+                launch_args["channel"] = channel
+            _browser = await _playwright.chromium.launch(**launch_args)
         return _browser
 
 
@@ -261,6 +275,107 @@ async def _screenshot_panels(items: list[tuple[str, str]]) -> list[tuple[str, by
 
 # ------- URL 组装 -------
 
+# 探测到的 nodeId 缓存 10 分钟
+_node_cache: dict[str, tuple[float, dict[str, str]]] = {}
+
+
+async def _resolve_node_id(
+    uid: str, base_vars: dict[str, str], instance_type: str,
+) -> dict[str, str]:
+    """针对 PolarDB / TaurusDB：先打开 /d/<uid> 面板，让 Grafana 自己选 nodeId
+    下拉的默认值，然后从 URL 读出真实的 var-nodeId / var-gaussdb_mysql_node_id。
+    其他类型直接返回原 base_vars。
+    """
+    import asyncio as _aio
+    import re as _re
+
+    # 需要探测哪个变量
+    if instance_type == "ali_polardb":
+        var_key = "var-nodeId"
+    elif instance_type == "hw_taurusdb":
+        var_key = "var-gaussdb_mysql_node_id"
+    else:
+        return base_vars
+
+    # 如果已经不是 "All"，直接用（给个显式值的话绕过探测）
+    if base_vars.get(var_key, "All") != "All":
+        return base_vars
+
+    # 缓存 key：uid + 关键变量（如 DBClusterDescription / instance_name）
+    cache_key_parts = [uid]
+    for k in ("var-DBClusterDescription", "var-instance_name"):
+        if k in base_vars:
+            cache_key_parts.append(f"{k}={base_vars[k]}")
+    cache_key = "|".join(cache_key_parts)
+
+    now = time.time()
+    cached = _node_cache.get(cache_key)
+    if cached and now - cached[0] < 600:
+        return {**base_vars, **cached[1]}
+
+    # 打开面板总览页，让 Grafana 把下拉选默认值
+    overview_url = _overview_url(uid, base_vars)
+    cfg = get_config()["screenshot"]
+    timeout_ms = cfg["render_timeout_sec"] * 1000
+
+    context = await _new_context()
+    try:
+        # 探测登录状态
+        page = await context.new_page()
+        await page.goto(overview_url, wait_until="domcontentloaded", timeout=timeout_ms)
+        html = (await page.content())[:2000].lower()
+        if "/login" in page.url or ("_xsrf" in html and "<form" in html):
+            await page.close()
+            await _ensure_logged_in(context)
+            page = await context.new_page()
+            await page.goto(overview_url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+        # 等 Grafana 把下拉值初始化好
+        try:
+            await page.wait_for_function(
+                f"""() => {{
+                    const u = new URL(window.location.href);
+                    const v = u.searchParams.get('{var_key}');
+                    return v && v !== 'All' && v !== '';
+                }}""",
+                timeout=timeout_ms,
+            )
+        except Exception:
+            pass
+        # 再多等一拍
+        await page.wait_for_timeout(1000)
+
+        current = page.url
+        await page.close()
+
+        m = _re.search(fr"[?&]{_re.escape(var_key)}=([^&]+)", current)
+        if m:
+            resolved = {var_key: m.group(1)}
+            _node_cache[cache_key] = (now, resolved)
+            return {**base_vars, **resolved}
+    finally:
+        await context.close()
+
+    # 探测失败就退回原值；Grafana 会显示 No data，但至少图能截出来
+    return base_vars
+
+
+def _overview_url(uid: str, variables: dict[str, str]) -> str:
+    """面板总览 URL（不带 panelId），用于让 Grafana 填默认变量。"""
+    cfg_g = get_config()["grafana"]
+    base = cfg_g["base"].rstrip("/")
+    qs: dict[str, str] = {
+        "orgId": "1",
+        "from": cfg_g["default_from"],
+        "to": cfg_g["default_to"],
+        "var-interval": "1m",
+        "var-datasource": "Prometheus",
+    }
+    qs.update(variables)
+    from urllib.parse import urlencode
+    return f"{base}/d/{uid}/?{urlencode(qs)}"
+
+
 def _solo_url(uid: str, panel_id: int, variables: dict[str, str]) -> str:
     cfg_g = get_config()["grafana"]
     base = cfg_g["base"].rstrip("/")
@@ -335,11 +450,19 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     # PILL 从 10 之后带了 DejaVu，但不支持中文；中文字符会被画成方块。
     # 先尝试几个常见中文字体路径，找到就用；都没有就退回默认。
     candidates = [
-        "/System/Library/Fonts/PingFang.ttc",                   # macOS
-        "/System/Library/Fonts/STHeiti Light.ttc",              # macOS fallback
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",       # Linux
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",# Linux 中文
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",        # WenQuanYi
+        # macOS
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        # Windows 中文字体
+        "C:/Windows/Fonts/msyh.ttc",       # 微软雅黑
+        "C:/Windows/Fonts/msyh.ttf",
+        "C:/Windows/Fonts/simhei.ttf",     # 黑体
+        "C:/Windows/Fonts/simsun.ttc",     # 宋体
+        "C:/Windows/Fonts/simsun.ttf",
+        # Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for p in candidates:
         try:
