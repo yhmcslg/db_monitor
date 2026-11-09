@@ -282,15 +282,28 @@ _node_cache: dict[str, tuple[float, dict[str, str]]] = {}
 async def _resolve_node_id(
     uid: str, base_vars: dict[str, str], instance_type: str,
 ) -> dict[str, str]:
-    """针对 PolarDB / TaurusDB：先打开 /d/<uid> 面板，让 Grafana 自己选 nodeId
-    下拉的默认值，然后从 URL 读出真实的 var-nodeId / var-gaussdb_mysql_node_id。
-    其他类型直接返回原 base_vars。
+    """补上 Grafana 面板里 nodeId 这种"必须具体值"的变量。
+
+    - 阿里 PolarDB：直接调阿里云 Open API 查 Writer 节点 ID（最可靠）
+    - 华为 TaurusDB：目前还是走 Playwright probe（后续有华为 SDK 可替换）
+    - 其他：不动
     """
     import asyncio as _aio
     import re as _re
 
-    # 需要探测哪个变量
+    # 阿里 PolarDB：优先走 SDK
     if instance_type == "ali_polardb":
+        cluster_desc = base_vars.get("var-DBClusterDescription") or ""
+        if cluster_desc and cluster_desc != "All":
+            # 现在的 base_vars 里如果已经显式填了具体 nodeId，就直接用
+            if base_vars.get("var-nodeId", "All") not in ("", "All"):
+                return base_vars
+            # 调阿里云 SDK（同步调用，放线程池）
+            from . import aliyun as _ali
+            node_id = await _aio.to_thread(_ali.get_polardb_writer_node_id, cluster_desc)
+            if node_id:
+                return {**base_vars, "var-nodeId": node_id}
+        # 兜底：SDK 拿不到就继续走下面的 Playwright probe
         var_key = "var-nodeId"
     elif instance_type == "hw_taurusdb":
         var_key = "var-gaussdb_mysql_node_id"

@@ -8,3 +8,6 @@ jinja2==3.1.4
 # Newer versions will trigger "This app cannot run on your PC".
 playwright==1.28.0
 pillow==10.4.0
+# Aliyun PolarDB SDK - lookup writer nodeId by cluster description
+alibabacloud_polardb20170801==5.1.0
+alibabacloud_tea_openapi==0.3.11
