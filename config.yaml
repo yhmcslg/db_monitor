@@ -95,7 +95,18 @@ kibana:
 # ========= Web 服务 =========
 server:
   host: 0.0.0.0
-  port: 8000
+  port: 5001
+
+# ========= 飞书机器人 =========
+feishu:
+  # 从「开发者后台 → 凭证与基础信息」拿
+  app_id: ""
+  app_secret: ""
+  # 事件配置里的 Verification Token
+  verification_token: ""
+  # 本服务可外部访问的 base URL（给飞书下载截图用）
+  # 空则用 http://<server.host>:<server.port>
+  public_base_url: ""
 
 # ========= 租户 -> 4 个库的推导规则 =========
 # {code} 会被替换为租户代码
