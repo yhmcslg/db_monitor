@@ -4,7 +4,7 @@ pymysql==1.1.1
 pyyaml==6.0.2
 requests==2.32.3
 jinja2==3.1.4
-# Playwright 1.28 是最后一个 Chromium 支持 Windows 7/8.1/Server2012R2 的版本
-# 换成新版会报 "此应用无法在你的电脑上运行"
+# Playwright 1.28 is the last Chromium that still runs on Windows 7/8.1/Server 2012R2.
+# Newer versions will trigger "This app cannot run on your PC".
 playwright==1.28.0
 pillow==10.4.0
