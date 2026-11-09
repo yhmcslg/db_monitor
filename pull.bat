@@ -32,13 +32,22 @@ if "!DEFAULT_BRANCH!"=="" (
 )
 
 echo Pulling origin/!DEFAULT_BRANCH! ...
+REM Retry up to 3 times - GitHub access from CN is flaky
+set TRY=0
+:pull_retry
 git pull --ff-only origin !DEFAULT_BRANCH!
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] git pull failed - local changes or conflicts?
-    pause
-    exit /b 1
+if %errorlevel%==0 goto pull_ok
+set /a TRY=TRY+1
+if !TRY! lss 3 (
+    echo [WARN] pull failed, retrying (!TRY!/3) ...
+    timeout /t 2 >nul
+    goto pull_retry
 )
+echo.
+echo [ERROR] git pull failed. Check network to github.com or local conflicts.
+pause
+exit /b 1
+:pull_ok
 
 echo.
 echo Updating Python dependencies ...
