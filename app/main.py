@@ -171,9 +171,16 @@ async def feishu_webhook(request: Request, background: BackgroundTasks):
         try:
             from . import feishu as fs
             msg = (body.get("event") or {}).get("message") or {}
+            chat_type = msg.get("chat_type")
             print(f"[feishu] im.message.receive_v1 chat_id={msg.get('chat_id')} "
-                  f"message_type={msg.get('message_type')} content={msg.get('content')}",
+                  f"chat_type={chat_type} message_type={msg.get('message_type')} "
+                  f"content={msg.get('content')}",
                   file=sys.stderr, flush=True)
+            # 群聊场景下，只有 @ 了本机器人才响应，避免被动响应群里其他 @
+            if chat_type == "group" and not fs.is_bot_mentioned(body):
+                print("[feishu] group message without bot mention, ignore",
+                      file=sys.stderr, flush=True)
+                return {"ok": True}
             tenant = fs.extract_tenant_code(body)
             print(f"[feishu] extracted tenant={tenant}", file=sys.stderr, flush=True)
         except Exception as exc:  # noqa: BLE001

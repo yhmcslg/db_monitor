@@ -26,6 +26,55 @@ _token_lock = threading.Lock()
 
 # ---------- token ----------
 
+_bot_info: dict | None = None
+_bot_info_ts: float = 0.0
+
+
+def get_bot_info() -> dict:
+    """拿当前机器人应用自身的信息（open_id、app_id 等），缓存 1 小时。"""
+    global _bot_info, _bot_info_ts
+    with _token_lock:
+        if _bot_info and time.time() - _bot_info_ts < 3600:
+            return _bot_info
+        token = get_tenant_access_token()
+        r = requests.get(
+            "https://open.feishu.cn/open-apis/bot/v3/info",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"拿 bot info 失败: {data}")
+        # 响应里 bot 字段含 open_id、app_name
+        _bot_info = data.get("bot") or {}
+        _bot_info_ts = time.time()
+        return _bot_info
+
+
+def is_bot_mentioned(body: dict) -> bool:
+    """判断消息里的 @ 列表里是否包含当前机器人。"""
+    msg = (body.get("event") or {}).get("message") or {}
+    mentions = msg.get("mentions") or []
+    if not mentions:
+        return False
+    try:
+        bot = get_bot_info()
+    except Exception as exc:  # noqa: BLE001
+        import sys
+        print(f"[feishu] get_bot_info failed, skip mention check: {exc}", file=sys.stderr)
+        return True  # 拿不到 bot 信息时就按原来的方式处理（宁可多回不漏回）
+    bot_open_id = bot.get("open_id") or ""
+    bot_app_id = bot.get("app_id") or ""
+    for m in mentions:
+        mid = m.get("id") or {}
+        # id 结构： {"union_id": "...", "user_id": "...", "open_id": "...", "app_id": "..."}
+        if bot_open_id and mid.get("open_id") == bot_open_id:
+            return True
+        if bot_app_id and mid.get("app_id") == bot_app_id:
+            return True
+    return False
+
+
 def get_tenant_access_token() -> str:
     """缓存 90% 有效期的 tenant_access_token。"""
     global _token, _token_expire
