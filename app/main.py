@@ -141,53 +141,68 @@ async def api_screenshot(
 
 
 @app.post("/feishu/webhook")
+def _log(msg: str) -> None:
+    """安全打印：Windows cmd 默认 GBK，中文/emoji 容易触发 UnicodeEncodeError，
+    这里强制按当前 stderr 编码 encode，无法编码的字符替换为 ?，避免整个 handler 500。"""
+    import sys
+    try:
+        sys.stderr.write(msg + "\n")
+        sys.stderr.flush()
+    except UnicodeEncodeError:
+        enc = getattr(sys.stderr, "encoding", None) or "utf-8"
+        sys.stderr.buffer.write(msg.encode(enc, errors="replace") + b"\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
-    import sys
-    body = await request.json()
+    import traceback
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[feishu] parse json failed: {exc}")
+        return {"ok": True}
     event_type = ((body.get("header") or {}).get("event_type")
-                  or body.get("event", {}).get("type")
+                  or (body.get("event") or {}).get("type")
                   or body.get("type"))
-    print(f"[feishu] webhook hit: type={event_type} body_keys={list(body.keys())}",
-          file=sys.stderr, flush=True)
+    _log(f"[feishu] webhook hit: type={event_type} body_keys={list(body.keys())}")
 
-    # 1) URL 验证：原样返回 challenge
-    if body.get("type") == "url_verification":
-        print(f"[feishu] url_verification challenge={body.get('challenge')}",
-              file=sys.stderr, flush=True)
-        return {"challenge": body.get("challenge")}
+    try:
+        # 1) URL 验证：原样返回 challenge
+        if body.get("type") == "url_verification":
+            _log(f"[feishu] url_verification challenge={body.get('challenge')}")
+            return {"challenge": body.get("challenge")}
 
-    # 2) Token 校验（1.0 schema 在顶层 token；2.0 schema 在 header.token）
-    cfg_fs = get_config().get("feishu", {})
-    expected = cfg_fs.get("verification_token") or ""
-    got = body.get("token") or (body.get("header") or {}).get("token") or ""
-    if expected and got and got != expected:
-        print(f"[feishu] token mismatch (expect={expected[:4]}..., got={got[:4]}...)",
-              file=sys.stderr, flush=True)
-        return JSONResponse(status_code=401, content={"error": "token mismatch"})
+        # 2) Token 校验（1.0 schema 在顶层 token；2.0 schema 在 header.token）
+        cfg_fs = get_config().get("feishu", {})
+        expected = cfg_fs.get("verification_token") or ""
+        got = body.get("token") or (body.get("header") or {}).get("token") or ""
+        if expected and got and got != expected:
+            _log(f"[feishu] token mismatch (expect={expected[:4]}..., got={got[:4]}...)")
+            return JSONResponse(status_code=401, content={"error": "token mismatch"})
 
-    # 3) 消息事件：同步只做"收到了"的回执，重活扔后台
-    if event_type == "im.message.receive_v1":
-        try:
+        # 3) 消息事件：同步只做"收到了"的回执，重活扔后台
+        if event_type == "im.message.receive_v1":
             from . import feishu as fs
             msg = (body.get("event") or {}).get("message") or {}
             chat_type = msg.get("chat_type")
-            print(f"[feishu] im.message.receive_v1 chat_id={msg.get('chat_id')} "
-                  f"chat_type={chat_type} message_type={msg.get('message_type')} "
-                  f"content={msg.get('content')}",
-                  file=sys.stderr, flush=True)
-            # 群聊场景下，只有 @ 了本机器人才响应，避免被动响应群里其他 @
+            _log(f"[feishu] im.message.receive_v1 chat_id={msg.get('chat_id')} "
+                 f"chat_type={chat_type} message_type={msg.get('message_type')} "
+                 f"content={msg.get('content')}")
             if chat_type == "group" and not fs.is_bot_mentioned(body):
-                print("[feishu] group message without bot mention, ignore",
-                      file=sys.stderr, flush=True)
+                _log("[feishu] group message without bot mention, ignore")
                 return {"ok": True}
             tenant = fs.extract_tenant_code(body)
-            print(f"[feishu] extracted tenant={tenant}", file=sys.stderr, flush=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[feishu] pre-dispatch log failed: {exc}", file=sys.stderr, flush=True)
-        background.add_task(_handle_message, body)
-    else:
-        print(f"[feishu] unknown event_type={event_type}, ignore", file=sys.stderr, flush=True)
+            _log(f"[feishu] extracted tenant={tenant}")
+            background.add_task(_handle_message, body)
+        else:
+            _log(f"[feishu] unknown event_type={event_type}, ignore")
+    except Exception:  # noqa: BLE001
+        _log("[feishu] webhook unhandled exception:\n" + traceback.format_exc())
+        # 不让 FastAPI 把 500 返回给飞书，否则飞书会重试
+        return {"ok": True}
     return {"ok": True}
 
 

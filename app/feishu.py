@@ -30,6 +30,20 @@ _bot_info: dict | None = None
 _bot_info_ts: float = 0.0
 
 
+def _log(msg: str) -> None:
+    """安全打印：规避 Windows cmd GBK 编码不能打印中文/emoji 的问题。"""
+    import sys
+    try:
+        sys.stderr.write(msg + "\n")
+        sys.stderr.flush()
+    except UnicodeEncodeError:
+        enc = getattr(sys.stderr, "encoding", None) or "utf-8"
+        sys.stderr.buffer.write(msg.encode(enc, errors="replace") + b"\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
 def get_bot_info() -> dict:
     """拿当前机器人应用自身的信息（open_id、app_id 等），缓存 1 小时。"""
     global _bot_info, _bot_info_ts
@@ -68,9 +82,8 @@ def is_bot_mentioned(body: dict) -> bool:
     bot_name = (cfg.get("bot_name") or "").strip()
     msg = (body.get("event") or {}).get("message") or {}
     mentions = msg.get("mentions") or []
-    print(f"[feishu] mention check: bot_open_id={bot_open_id!r} "
-          f"bot_name={bot_name!r} mentions={mentions}",
-          file=sys.stderr, flush=True)
+    _log(f"[feishu] mention check: bot_open_id={bot_open_id!r} "
+         f"bot_name={bot_name!r} mentions={mentions}")
     if not mentions:
         return False
     for m in mentions:
@@ -168,8 +181,7 @@ def _post(url: str, payload: dict, token: str) -> dict:
     except Exception:
         data = {"_raw": r.text[:400], "_status": r.status_code}
     if r.status_code >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 0)):
-        print(f"[feishu] POST {url} -> {r.status_code} {str(data)[:400]}",
-              file=sys.stderr, flush=True)
+        _log(f"[feishu] POST {url} -> {r.status_code} {str(data)[:400]}")
     return data
 
 
