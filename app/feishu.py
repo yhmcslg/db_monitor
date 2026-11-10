@@ -89,13 +89,21 @@ def get_chat_id(body: dict) -> str | None:
 # ---------- 发消息 ----------
 
 def _post(url: str, payload: dict, token: str) -> dict:
+    import sys
     r = requests.post(
         url,
         json=payload,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
         timeout=15,
     )
-    return r.json()
+    try:
+        data = r.json()
+    except Exception:
+        data = {"_raw": r.text[:400], "_status": r.status_code}
+    if r.status_code >= 400 or (isinstance(data, dict) and data.get("code") not in (None, 0)):
+        print(f"[feishu] POST {url} -> {r.status_code} {str(data)[:400]}",
+              file=sys.stderr, flush=True)
+    return data
 
 
 def reply_text(message_id: str, text: str) -> dict:

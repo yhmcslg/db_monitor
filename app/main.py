@@ -111,10 +111,18 @@ async def api_screenshot(
 @app.post("/feishu/webhook")
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
+    import sys
     body = await request.json()
+    event_type = ((body.get("header") or {}).get("event_type")
+                  or body.get("event", {}).get("type")
+                  or body.get("type"))
+    print(f"[feishu] webhook hit: type={event_type} body_keys={list(body.keys())}",
+          file=sys.stderr, flush=True)
 
     # 1) URL 验证：原样返回 challenge
     if body.get("type") == "url_verification":
+        print(f"[feishu] url_verification challenge={body.get('challenge')}",
+              file=sys.stderr, flush=True)
         return {"challenge": body.get("challenge")}
 
     # 2) Token 校验（1.0 schema 在顶层 token；2.0 schema 在 header.token）
@@ -122,13 +130,25 @@ async def feishu_webhook(request: Request, background: BackgroundTasks):
     expected = cfg_fs.get("verification_token") or ""
     got = body.get("token") or (body.get("header") or {}).get("token") or ""
     if expected and got and got != expected:
+        print(f"[feishu] token mismatch (expect={expected[:4]}..., got={got[:4]}...)",
+              file=sys.stderr, flush=True)
         return JSONResponse(status_code=401, content={"error": "token mismatch"})
 
     # 3) 消息事件：同步只做"收到了"的回执，重活扔后台
-    event_type = ((body.get("header") or {}).get("event_type")
-                  or body.get("event", {}).get("type"))
     if event_type == "im.message.receive_v1":
+        try:
+            from . import feishu as fs
+            msg = (body.get("event") or {}).get("message") or {}
+            print(f"[feishu] im.message.receive_v1 chat_id={msg.get('chat_id')} "
+                  f"message_type={msg.get('message_type')} content={msg.get('content')}",
+                  file=sys.stderr, flush=True)
+            tenant = fs.extract_tenant_code(body)
+            print(f"[feishu] extracted tenant={tenant}", file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[feishu] pre-dispatch log failed: {exc}", file=sys.stderr, flush=True)
         background.add_task(_handle_message, body)
+    else:
+        print(f"[feishu] unknown event_type={event_type}, ignore", file=sys.stderr, flush=True)
     return {"ok": True}
 
 
@@ -139,6 +159,7 @@ async def _handle_message(body: dict) -> None:
     必须跑在 FastAPI 本身的 event loop 里，不能 asyncio.run() 另起 loop。
     """
     import sys, traceback, asyncio
+    print("[feishu] _handle_message started", file=sys.stderr, flush=True)
     try:
         from . import feishu as fs
         tenant = fs.extract_tenant_code(body)
