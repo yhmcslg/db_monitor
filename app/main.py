@@ -159,15 +159,20 @@ def _log(msg: str) -> None:
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
     import traceback
+    # 整个 handler 外层 try：任何异常都返回 200，不让飞书重试打爆
     try:
-        body = await request.json()
-    except Exception as exc:  # noqa: BLE001
-        _log(f"[feishu] parse json failed: {exc}")
+        try:
+            body = await request.json()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[feishu] parse json failed: {exc}")
+            return {"ok": True}
+        event_type = ((body.get("header") or {}).get("event_type")
+                      or (body.get("event") or {}).get("type")
+                      or body.get("type"))
+        _log(f"[feishu] webhook hit: type={event_type} body_keys={list(body.keys())}")
+    except Exception:  # noqa: BLE001
+        _log("[feishu] webhook early exception:\n" + traceback.format_exc())
         return {"ok": True}
-    event_type = ((body.get("header") or {}).get("event_type")
-                  or (body.get("event") or {}).get("type")
-                  or body.get("type"))
-    _log(f"[feishu] webhook hit: type={event_type} body_keys={list(body.keys())}")
 
     try:
         # 1) URL 验证：原样返回 challenge
