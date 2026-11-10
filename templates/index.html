@@ -85,10 +85,10 @@
 
     <h2>ELK 慢 SQL</h2>
     <div class="card">
-      {% if result.elk.error %}
-        <div class="warn">{{ result.elk.error }}</div>
-      {% endif %}
-      <a class="link" href="{{ result.elk.url }}" target="_blank">{{ result.elk.url }}</a>
+      {# 长链里 !()' 这些字符会被许多客户端的"自动识别超链接"截断，
+         所以展示用 result.elk.display_url（已把特殊字符 URL-encode）。
+         浏览器打开会自动 decode，Kibana 一样能解析。 #}
+      <a class="link" href="{{ result.elk.display_url }}" target="_blank">{{ result.elk.display_url }}</a>
     </div>
 
     <details open>

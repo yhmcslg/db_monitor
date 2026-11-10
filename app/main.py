@@ -50,7 +50,12 @@ def _lookup(tenant_code: str) -> dict:
             }
             for g in grafana_links
         ],
-        "elk": {"url": elk_url, "error": elk_err},
+        "elk": {
+            "url": elk_url,
+            # 把 ! ( ) ' , 等字符 URL-encode，避免客户端"自动识别超链接"被截断
+            "display_url": _encode_elk_long_url(elk_url),
+            "error": elk_err,
+        },
         "screenshot_enabled": screenshot_enabled,
     }
 
@@ -58,6 +63,30 @@ def _lookup(tenant_code: str) -> dict:
 def _screenshot_key(link) -> str:
     """稳定、可读的 key，用来在 /api/screenshot 里反查这条链接。"""
     return f"{link.instance_type}|{link.instance_label}"
+
+
+def _encode_elk_long_url(url: str) -> str:
+    """把 ELK discover 长链里会被客户端"识别超链接"截断的字符做百分号编码。
+
+    Kibana 的 _g=(...) / _a=(...) 原生格式里有 ! ( ) ' , 这些字符，
+    飞书 / 微信 / 钉钉等很多富文本客户端的自动识别逻辑看到 ( 就会把链接截断，
+    导致用户点击只能跳到一半的 URL。把它们编码成 %xx 后客户端还能识别全长。
+    浏览器打开时会自动 decode 回去，不影响 Kibana 解析。
+    """
+    if not url:
+        return url
+    # 保留 scheme、host、路径、#，只对 hash 后面的参数部分转义
+    if "#" not in url:
+        return url
+    head, hash_part = url.split("#", 1)
+    mapping = str.maketrans({
+        "!": "%21",
+        "(": "%28",
+        ")": "%29",
+        "'": "%27",
+        ",": "%2C",
+    })
+    return head + "#" + hash_part.translate(mapping)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -181,9 +210,7 @@ async def _handle_message(body: dict) -> None:
         # 1. 文本消息：Grafana 链接 + ELK 短链
         lines = [f"租户：{tenant}", ""]
         lines.append("ELK 慢 SQL：")
-        lines.append(data["elk"]["url"])
-        if data["elk"].get("error"):
-            lines.append(f"（短链失败：{data['elk']['error']}）")
+        lines.append(data["elk"].get("display_url") or data["elk"]["url"])
         lines.append("")
         lines.append("Grafana 监控：")
         for g in data["grafana"]:
@@ -200,15 +227,17 @@ async def _handle_message(body: dict) -> None:
 
         from .db import query_schemas
         from .grafana import build_grafana_links
-        from .screenshot import render_instance_png
+        from .screenshot import render_instance_panels
 
         infos = await asyncio.to_thread(query_schemas, tenant.strip())
         links = build_grafana_links(infos)
         for link in links:
             try:
-                png = await render_instance_png(tenant, link, infos)
-                image_key = await asyncio.to_thread(fs.upload_image, png)
-                await asyncio.to_thread(fs.send_image, chat_id, image_key)
+                # 一个实例 N 张图，每张单独发，飞书不会把它压缩成竖条
+                panels = await render_instance_panels(tenant, link, infos)
+                for _name, png in panels:
+                    image_key = await asyncio.to_thread(fs.upload_image, png)
+                    await asyncio.to_thread(fs.send_image, chat_id, image_key)
             except Exception as exc:  # noqa: BLE001
                 await asyncio.to_thread(
                     fs.send_text, chat_id,

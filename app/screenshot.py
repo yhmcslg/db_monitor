@@ -85,6 +85,78 @@ async def render_instance_png(tenant: str, link: GrafanaLink, infos: list[Schema
     return png
 
 
+async def render_instance_panels(
+    tenant: str, link: GrafanaLink, infos: list[SchemaInfo],
+) -> list[tuple[str, bytes]]:
+    """为单个实例生成 N 张独立 PNG（每张对应一个 panel，带小标题带）。
+
+    返回 [(panel_display_name, png_bytes), ...]。
+    用于飞书场景：每张单独发消息，飞书不会把它压缩成竖条。
+    """
+    cfg = get_config()["screenshot"]
+    cache_key = (tenant, "panels|" + link.instance_type + "|" + link.instance_label)
+
+    now = time.time()
+    cached = _panel_cache.get(cache_key)
+    if cached and now - cached[0] < cfg["cache_ttl_sec"]:
+        return cached[1]
+
+    rep = next((i for i in infos if i.schemaname in link.schemas), None)
+    if rep is None:
+        raise RuntimeError(f"找不到实例对应的 SchemaInfo: {link.instance_label}")
+
+    panels_cfg = get_config()["grafana"]["panels"].get(rep.instance_type)
+    if not panels_cfg:
+        raise RuntimeError(f"config.yaml 未配置 {rep.instance_type} 的 panels")
+
+    uid = get_config()["grafana"]["dashboards"][rep.instance_type]
+    base_vars = _panel_vars(rep)
+    base_vars = await _resolve_node_id(uid, base_vars, rep.instance_type)
+
+    panel_items: list[tuple[str, str]] = []
+    for display, panel_id in panels_cfg.items():
+        panel_items.append((display, _solo_url(uid, panel_id, base_vars)))
+
+    panel_pngs = await _screenshot_panels(panel_items)
+
+    # 给每张图单独加一个标题条（panel 名 + 实例名）
+    out: list[tuple[str, bytes]] = []
+    for name, data in panel_pngs:
+        wrapped = _wrap_single(link, name, data)
+        out.append((name, wrapped))
+
+    _panel_cache[cache_key] = (now, out)
+    return out
+
+
+_panel_cache: dict[tuple[str, str], tuple[float, list[tuple[str, bytes]]]] = {}
+
+
+def _wrap_single(link: GrafanaLink, panel_name: str, data: bytes) -> bytes:
+    """给单张 panel 图上面加一条标题带：实例标签 + panel 名称。"""
+    cfg = get_config()["screenshot"]
+    pw = cfg["panel_width"]
+    title_h = 56
+    title_font = _get_font(18)
+    sub_font = _get_font(13)
+
+    img = Image.open(io.BytesIO(data))
+    if img.width != pw:
+        scale = pw / img.width
+        img = img.resize((pw, int(img.height * scale)))
+
+    canvas = Image.new("RGB", (pw, title_h + img.height), "white")
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([(0, 0), (pw, title_h)], fill="#1f2937")
+    draw.text((16, 8), f"{link.instance_label}", fill="white", font=title_font)
+    draw.text((16, 32), f"{panel_name}", fill="#d1d5db", font=sub_font)
+    canvas.paste(img, (0, title_h))
+
+    out = io.BytesIO()
+    canvas.save(out, format="PNG")
+    return out.getvalue()
+
+
 # ------- Playwright 封装 -------
 
 async def _get_browser():

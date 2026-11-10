@@ -87,7 +87,7 @@ def _login(base: str, user: str, pwd: str, verify: bool) -> tuple[requests.Sessi
     s.verify = verify
     # 1. GET /login 拿 _xsrf 和初始 cookie
     try:
-        r = s.get(base + "/login", timeout=10, allow_redirects=True)
+        r = s.get(base + "/login", timeout=30, allow_redirects=True)
     except requests.RequestException as e:
         return None, f"GET /login: {e}"
     if r.status_code != 200:
@@ -102,7 +102,7 @@ def _login(base: str, user: str, pwd: str, verify: bool) -> tuple[requests.Sessi
         r2 = s.post(
             base + "/login",
             data={"_xsrf": xsrf, "username": user, "password": pwd},
-            timeout=10,
+            timeout=30,
             allow_redirects=True,
         )
     except requests.RequestException as e:
@@ -129,70 +129,10 @@ def _get_session(base: str, user: str, pwd: str, verify: bool) -> tuple[requests
 
 
 def build_short_url(users: list[str]) -> tuple[str, str | None]:
-    """返回 (final_url, error)。失败则 final_url 退化为长链，error 说明原因。"""
-    cfg = get_config()["kibana"]
-    base = cfg["base"].rstrip("/")
-    user = cfg.get("username") or ""
-    pwd = cfg.get("password") or ""
-    verify = cfg.get("verify_ssl", True)
-    path = _build_discover_path(users)
-    long_url = base + path
+    """返回 (final_url, error)。
 
-    if not user or not pwd:
-        return long_url, "未配置 Kibana 账号密码，返回长链"
-
-    if not verify:
-        warnings.filterwarnings("ignore", category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
-
-    session, err = _get_session(base, user, pwd, verify)
-    if session is None:
-        return long_url, f"登录网关失败：{err}"
-
-    endpoints_payloads = [
-        # 新版 Kibana (7.14+)
-        ("/api/short_url", {"locatorId": "LEGACY_SHORT_URL_LOCATOR", "params": {"url": path}}),
-        # 简单版（有些版本也接受）
-        ("/api/short_url", {"url": path}),
-        # 老版 Kibana (7.13-)
-        ("/api/shorten_url", {"url": path}),
-    ]
-    last_err: str | None = None
-
-    for ep, payload in endpoints_payloads:
-        try:
-            resp = session.post(
-                base + ep,
-                json=payload,
-                headers={"kbn-xsrf": "true", "Content-Type": "application/json"},
-                timeout=10,
-            )
-        except requests.RequestException as e:
-            last_err = f"{ep}: {e}"
-            continue
-
-        if _looks_like_login_html(resp.text):
-            # session 可能被挤掉或过期：重登一次
-            global _session
-            with _session_lock:
-                _session = None
-            last_err = f"{ep}: 网关要求重新登录"
-            continue
-
-        if resp.status_code >= 400:
-            last_err = f"{ep}: HTTP {resp.status_code} {resp.text[:200]}"
-            continue
-
-        try:
-            data = resp.json()
-        except ValueError:
-            last_err = f"{ep}: 响应非 JSON：{resp.text[:200]}"
-            continue
-
-        # 兼容多种返回格式
-        short_id = data.get("id") or data.get("urlId")
-        if not short_id:
-            last_err = f"{ep}: 响应里找不到 id：{str(data)[:200]}"
-            continue
-        return f"{base}/goto/{short_id}", None
-
-    return long_url, last_err or "短链接口全部失败"
+    短链功能目前关闭（部署机器无法直接访问 ELK），直接返回长链，不走任何 API。
+    error 固定为 None，上层 main.py 据此跳过"把长链 encode 展示"的分支。
+    """
+    base = get_config()["kibana"]["base"].rstrip("/")
+    return base + _build_discover_path(users), None

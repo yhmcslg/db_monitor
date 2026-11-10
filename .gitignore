@@ -5,6 +5,7 @@ config.yaml
 __pycache__/
 *.pyc
 *.pyo
+*.bak
 .venv/
 venv/
 *.egg-info/
