@@ -91,23 +91,25 @@ def query_schemas(tenant_code: str) -> list[SchemaInfo]:
             cur.execute(sql)
             rows = cur.fetchall()
 
-            # 对阿里 ECS 和华为 ECS：把 serverinnerip 视为可能的 VIP，查 havip 表换成 masterip
-            vip_lookup_sql = cfg["mysql"].get("havip_lookup_sql")
-            if vip_lookup_sql:
-                ecs_ips = {
-                    (r.get("serverinnerip") or "").strip()
-                    for r in rows
-                    if _classify(r) in ("ali_ecs", "hw_ecs") and r.get("serverinnerip")
-                }
-                vip_to_master = _batch_lookup_masterip(cur, vip_lookup_sql, ecs_ips)
-                import sys
-                for vip in ecs_ips:
-                    if vip in vip_to_master:
-                        print(f"[havip] VIP {vip} -> master {vip_to_master[vip]}", file=sys.stderr)
-                    else:
-                        print(f"[havip] VIP {vip} not found in havip table, keep as-is", file=sys.stderr)
-            else:
-                vip_to_master = {}
+        # 对阿里 ECS 和华为 ECS：把 serverinnerip 视为可能的 VIP，查 havip 表换成 masterip
+        # 用独立 cursor，避免和上面的游标状态混在一起
+        vip_lookup_sql = cfg["mysql"].get("havip_lookup_sql")
+        if vip_lookup_sql:
+            ecs_ips = {
+                (r.get("serverinnerip") or "").strip()
+                for r in rows
+                if _classify(r) in ("ali_ecs", "hw_ecs") and r.get("serverinnerip")
+            }
+            with conn.cursor() as cur2:
+                vip_to_master = _batch_lookup_masterip(cur2, vip_lookup_sql, ecs_ips)
+            import sys
+            for vip in ecs_ips:
+                if vip in vip_to_master:
+                    print(f"[havip] VIP {vip} -> master {vip_to_master[vip]}", file=sys.stderr)
+                else:
+                    print(f"[havip] VIP {vip} not found in havip table, keep as-is", file=sys.stderr)
+        else:
+            vip_to_master = {}
     finally:
         conn.close()
 
@@ -141,15 +143,23 @@ def query_schemas(tenant_code: str) -> list[SchemaInfo]:
 
 def _batch_lookup_masterip(cur, sql: str, ips: set[str]) -> dict[str, str]:
     """对每个候选 VIP 查 havip 表，查到就返回 vip->masterip 映射。"""
+    import sys
     out: dict[str, str] = {}
     for ip in ips:
         if not ip:
             continue
         try:
-            cur.execute(sql, (ip,))
+            n = cur.execute(sql, (ip,))
             row = cur.fetchone()
-        except Exception:
+            # 把残余结果读掉，避免影响下一次 execute
+            try:
+                cur.fetchall()
+            except Exception:
+                pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[havip] query failed for {ip}: {e}", file=sys.stderr)
             continue
+        print(f"[havip] query vip={ip!r} rows={n} row={row!r}", file=sys.stderr)
         if not row:
             continue
         master = row.get("masterip") if isinstance(row, dict) else row[0]

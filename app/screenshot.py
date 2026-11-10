@@ -119,10 +119,10 @@ async def render_instance_panels(
 
     panel_pngs = await _screenshot_panels(panel_items)
 
-    # 给每张图单独加一个标题条（panel 名 + 实例名）
+    # 给每张图单独加一个标题条（panel 名 + 实例名 + 业务库名）
     out: list[tuple[str, bytes]] = []
     for name, data in panel_pngs:
-        wrapped = _wrap_single(link, name, data)
+        wrapped = _wrap_single(link, name, data, tenant)
         out.append((name, wrapped))
 
     _panel_cache[cache_key] = (now, out)
@@ -132,11 +132,14 @@ async def render_instance_panels(
 _panel_cache: dict[tuple[str, str], tuple[float, list[tuple[str, bytes]]]] = {}
 
 
-def _wrap_single(link: GrafanaLink, panel_name: str, data: bytes) -> bytes:
-    """给单张 panel 图上面加一条标题带：实例标签 + panel 名称。"""
+def _wrap_single(link: GrafanaLink, panel_name: str, data: bytes, tenant: str) -> bytes:
+    """给单张 panel 图上面加一条标题带：实例标签 + panel 名称 + 业务库名。"""
+    from .config import format_schemas
+
     cfg = get_config()["screenshot"]
     pw = cfg["panel_width"]
-    title_h = 56
+    # 三行文本：实例标签 / panel 名 / 库列表
+    title_h = 76
     title_font = _get_font(18)
     sub_font = _get_font(13)
 
@@ -148,8 +151,10 @@ def _wrap_single(link: GrafanaLink, panel_name: str, data: bytes) -> bytes:
     canvas = Image.new("RGB", (pw, title_h + img.height), "white")
     draw = ImageDraw.Draw(canvas)
     draw.rectangle([(0, 0), (pw, title_h)], fill="#1f2937")
-    draw.text((16, 8), f"{link.instance_label}", fill="white", font=title_font)
-    draw.text((16, 32), f"{panel_name}", fill="#d1d5db", font=sub_font)
+    draw.text((16, 6),  f"{link.instance_label}", fill="white", font=title_font)
+    draw.text((16, 30), f"{panel_name}", fill="#d1d5db", font=sub_font)
+    labels = format_schemas(link.schemas, tenant)
+    draw.text((16, 50), "库：" + " / ".join(labels), fill="#d1d5db", font=sub_font)
     canvas.paste(img, (0, title_h))
 
     out = io.BytesIO()
