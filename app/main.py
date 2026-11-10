@@ -140,7 +140,6 @@ async def api_screenshot(
         return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}: {exc}"})
 
 
-@app.post("/feishu/webhook")
 def _log(msg: str) -> None:
     """安全打印：Windows cmd 默认 GBK，中文/emoji 容易触发 UnicodeEncodeError，
     这里强制按当前 stderr 编码 encode，无法编码的字符替换为 ?，避免整个 handler 500。"""
@@ -156,6 +155,7 @@ def _log(msg: str) -> None:
         pass
 
 
+@app.post("/feishu/webhook")
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
     import traceback
