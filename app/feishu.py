@@ -54,29 +54,41 @@ def get_bot_info() -> dict:
 def is_bot_mentioned(body: dict) -> bool:
     """判断消息里的 @ 列表里是否包含当前机器人。
 
-    用 config.yaml 里的 feishu.app_id 与 mentions.id.app_id 比对，不走额外 API。
+    飞书 webhook 事件里，mention.id 只带 open_id/union_id（用户层），
+    没有 app_id。但有两个字段可用：
+      mentioned_type='bot'  → 这是对机器人的 @
+      name='DB_Monitor'     → 机器人名
+      id.open_id='ou_xxx'   → 机器人的 open_id
+    优先级：配置里有 bot_open_id 就精确匹配；否则 name 匹配；
+    都没配就按 mentioned_type=='bot' 放行（适合群里只有一个机器人）。
     """
     import sys
     cfg = get_config().get("feishu", {})
-    my_app_id = (cfg.get("app_id") or "").strip()
+    bot_open_id = (cfg.get("bot_open_id") or "").strip()
+    bot_name = (cfg.get("bot_name") or "").strip()
     msg = (body.get("event") or {}).get("message") or {}
     mentions = msg.get("mentions") or []
-    print(f"[feishu] mention check: my_app_id={my_app_id} mentions={mentions}",
+    print(f"[feishu] mention check: bot_open_id={bot_open_id!r} "
+          f"bot_name={bot_name!r} mentions={mentions}",
           file=sys.stderr, flush=True)
     if not mentions:
         return False
-    if not my_app_id:
-        # 配置里没填 app_id，无法判断，放行
-        print("[feishu] feishu.app_id not configured, bypass check",
-              file=sys.stderr, flush=True)
-        return True
     for m in mentions:
+        mtype = (m.get("mentioned_type") or "").lower()
         mid = m.get("id") or {}
-        if isinstance(mid, str):
-            if mid == my_app_id:
+        mopen = mid.get("open_id") if isinstance(mid, dict) else ""
+        mname = (m.get("name") or "").strip()
+
+        if bot_open_id:
+            if mopen == bot_open_id:
                 return True
             continue
-        if mid.get("app_id") == my_app_id:
+        if bot_name:
+            if mname == bot_name:
+                return True
+            continue
+        # 都没配：是 @ 到机器人就放行
+        if mtype == "bot":
             return True
     return False
 
