@@ -50,6 +50,62 @@ def _client():
     return Client(config)
 
 
+def get_ecs_instance_id(private_ip: str) -> str | None:
+    """用 ECS 内网 IP 反查 instanceId（形如 i-uf6xxx），供 Grafana var-instanceId 用。"""
+    if not private_ip:
+        return None
+
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(f"ecs:{private_ip}")
+        if hit and now - hit[0] < _TTL:
+            return hit[1]
+
+    creds = _creds()
+    if creds is None:
+        return None
+    ak, sk, region = creds
+
+    try:
+        from alibabacloud_ecs20140526.client import Client
+        from alibabacloud_ecs20140526 import models as ecs_models
+        from alibabacloud_tea_openapi.models import Config
+    except ImportError:
+        return None
+
+    try:
+        client = Client(Config(
+            access_key_id=ak,
+            access_key_secret=sk,
+            region_id=region,
+            endpoint=f"ecs.{region}.aliyuncs.com",
+        ))
+        req = ecs_models.DescribeInstancesRequest(
+            region_id=region,
+            private_ip_addresses='["' + private_ip + '"]',
+        )
+        resp = client.describe_instances(req)
+    except Exception as exc:  # noqa: BLE001
+        import sys
+        print(f"[aliyun] DescribeInstances failed for '{private_ip}': {exc}", file=sys.stderr)
+        return None
+
+    instances = ((resp.body.instances.instance if resp and resp.body and resp.body.instances else None) or [])
+    if not instances:
+        import sys
+        print(f"[aliyun] No ECS matches private ip '{private_ip}' (check region_id)", file=sys.stderr)
+        return None
+
+    iid = instances[0].instance_id
+    if not iid:
+        return None
+    with _cache_lock:
+        _cache[f"ecs:{private_ip}"] = (now, iid)
+    import sys
+    print(f"[aliyun] ECS ip '{private_ip}' -> instanceId={iid}", file=sys.stderr)
+    return iid
+
+
 def get_polardb_writer_node_id(cluster_description: str) -> str | None:
     """用集群描述（Grafana 面板里的 DBClusterDescription）查 Writer 节点 ID。"""
     if not cluster_description:

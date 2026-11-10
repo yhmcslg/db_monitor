@@ -201,7 +201,12 @@ async def _grafana_native_login(context) -> None:
 
 
 async def _capture_one(context, title: str, url: str, timeout_ms: int) -> tuple[str, bytes]:
-    """打开 d-solo URL，截 panel DOM 元素。"""
+    """打开 d-solo URL，截 panel DOM 元素。
+
+    等待策略：面板容器出现 → 等 "No data" 消失（数据回来了）→ 再等折线画完 → 截图。
+    Grafana 首次加载变量时先发一次空查询（No data），数据回来后会重新渲染，
+    所以必须以 "No data 消失" 为完成信号，不能用 "No data 出现"。
+    """
     page = await context.new_page()
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -215,25 +220,50 @@ async def _capture_one(context, title: str, url: str, timeout_ms: int) -> tuple[
             except Exception:
                 continue
 
-        # 等里面的图画出来：canvas 或 svg 里的 path
+        # 等 "No data" 消失（数据真正加载回来）。最多等 timeout，超时就刷新一次页面重试
+        no_data_gone = False
+        try:
+            await page.wait_for_function(
+                """() => !document.querySelector('.panel-empty, .datapoints-warning')""",
+                timeout=min(timeout_ms, 12000),
+            )
+            no_data_gone = True
+        except Exception:
+            pass
+
+        if not no_data_gone:
+            # Grafana 首次加载时变量级联解析可能让第一次查询落空，
+            # 刷新页面后 URL 里的变量值直接生效，数据就能回来
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
+                if container is not None:
+                    for sel in [".panel-container", "[data-panelid]", ".dashboard-solo"]:
+                        try:
+                            container = await page.wait_for_selector(sel, timeout=timeout_ms, state="visible")
+                            if container:
+                                break
+                        except Exception:
+                            continue
+                await page.wait_for_function(
+                    """() => !document.querySelector('.panel-empty, .datapoints-warning')""",
+                    timeout=timeout_ms,
+                )
+            except Exception:
+                pass  # 刷新后还是没数据就按现状截
+
+        # 数据回来后 Grafana 还要一拍画折线/图例/坐标
         try:
             await page.wait_for_function(
                 """() => {
                     const c = document.querySelector('canvas');
                     if (c && c.width > 0 && c.height > 0) return true;
-                    const path = document.querySelector('svg path');
-                    if (path) return true;
-                    // "No data" 也算渲染完成
-                    const nd = document.querySelector('.panel-empty, .datapoints-warning');
-                    return !!nd;
+                    return !!document.querySelector('svg path');
                 }""",
-                timeout=timeout_ms,
+                timeout=15000,
             )
         except Exception:
             pass
-
-        # 稳一点，再给 Grafana 一拍把图例/坐标画全
-        await page.wait_for_timeout(2000)
+        await page.wait_for_timeout(1500)
 
         if container:
             png = await container.screenshot()
@@ -425,7 +455,7 @@ def _panel_vars(info: SchemaInfo) -> dict[str, str]:
             "var-RegionId": "All", "var-Env": "All", "var-Product_Line": "All",
             "var-Server_Type": "All", "var-OSType": "All",
             "var-PrivateIpAddress": info.serverinnerip or "All",
-            "var-PublicIpAddress": "All", "var-InstanceName": "All", "var-instanceId": "All",
+            "var-PublicIpAddress": "All", "var-InstanceName": "All",
         }
     if t == "hw_taurusdb":
         node_name = f"{info.name}_node01" if info.name else "All"
@@ -448,7 +478,6 @@ def _panel_vars(info: SchemaInfo) -> dict[str, str]:
             "var-Env": "All", "var-Product_Line": "All", "var-db_type": "All",
             "var-private_ip": info.serverinnerip or "All",
             "var-public_ip": "All", "var-name": info.name or "All",
-            "var-instance_id": "All",
         }
     if t == "hw_ecs":
         return {
@@ -456,7 +485,6 @@ def _panel_vars(info: SchemaInfo) -> dict[str, str]:
             "var-os_type": "All",
             "var-private_ip_address": info.serverinnerip or "All",
             "var-public_ip_address": "All", "var-name": info.name or "All",
-            "var-instance_id": "All",
         }
     return {}
 

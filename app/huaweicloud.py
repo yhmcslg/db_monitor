@@ -54,6 +54,70 @@ def _client():
             .build())
 
 
+def get_ecs_instance_id(name: str | None = None, private_ip: str | None = None) -> str | None:
+    """用 ECS 名字或内网 IP 反查实例 ID，供 Grafana var-instance_id 用。"""
+    if not name and not private_ip:
+        return None
+
+    cache_key = f"ecs:{name or ''}|{private_ip or ''}"
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(cache_key)
+        if hit and now - hit[0] < _TTL:
+            return hit[1]
+
+    creds = _creds()
+    if creds is None:
+        return None
+    ak, sk, region, project_id = creds
+
+    try:
+        from huaweicloudsdkcore.auth.credentials import BasicCredentials
+        from huaweicloudsdkcore.http.http_config import HttpConfig
+        try:
+            from huaweicloudsdkecs.v2 import EcsClient
+        except ImportError:
+            from huaweicloudsdkecs.v2.ecs_client import EcsClient
+        from huaweicloudsdkecs.v2.region.ecs_region import EcsRegion
+        from huaweicloudsdkecs.v2.model.list_servers_details_request import \
+            ListServersDetailsRequest
+    except ImportError:
+        return None
+
+    try:
+        client = (EcsClient.new_builder()
+                  .with_credentials(BasicCredentials(ak, sk, project_id))
+                  .with_region(EcsRegion.value_of(region))
+                  .with_http_config(HttpConfig.get_default_config())
+                  .build())
+        req = ListServersDetailsRequest(
+            name=name or None,
+            ip=private_ip or None,
+        )
+        resp = client.list_servers_details(req)
+    except Exception as exc:  # noqa: BLE001
+        import sys
+        print(f"[huaweicloud] ListServersDetails failed (name={name}, ip={private_ip}): {exc}",
+              file=sys.stderr)
+        return None
+
+    servers = (resp.servers if resp else None) or []
+    if not servers:
+        import sys
+        print(f"[huaweicloud] No ECS matches name='{name}' ip='{private_ip}' (check region_id)",
+              file=sys.stderr)
+        return None
+
+    sid = getattr(servers[0], "id", None)
+    if not sid:
+        return None
+    with _cache_lock:
+        _cache[cache_key] = (now, sid)
+    import sys
+    print(f"[huaweicloud] ECS (name={name}, ip={private_ip}) -> id={sid}", file=sys.stderr)
+    return sid
+
+
 def get_taurusdb_master_node_id(instance_name: str) -> str | None:
     if not instance_name:
         return None

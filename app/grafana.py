@@ -110,6 +110,8 @@ def _url_for(info: SchemaInfo) -> str:
         })
 
     if t == "ali_ecs":
+        # 注意：不要传 var-instanceId=All，否则 Grafana 会卡在级联解析里；
+        # 不传这个参数让面板走默认值，即可立即出数据
         return _build_url(uids["ali_ecs"], {
             "var-RegionId": "All",
             "var-Env":      "All",
@@ -119,7 +121,6 @@ def _url_for(info: SchemaInfo) -> str:
             "var-PrivateIpAddress": info.serverinnerip or "All",
             "var-PublicIpAddress":  "All",
             "var-InstanceName":     "All",
-            "var-instanceId":       "All",
         })
 
     if t == "hw_taurusdb":
@@ -142,6 +143,7 @@ def _url_for(info: SchemaInfo) -> str:
         })
 
     if t == "hw_rds":
+        # 不传 var-instance_id=All，避免 Grafana 级联解析导致 No data
         return _build_url(uids["hw_rds"], {
             "var-Env":          "All",
             "var-Product_Line": "All",
@@ -149,10 +151,10 @@ def _url_for(info: SchemaInfo) -> str:
             "var-private_ip":   info.serverinnerip or "All",
             "var-public_ip":    "All",
             "var-name":         info.name or "All",
-            "var-instance_id":  "All",
         })
 
     if t == "hw_ecs":
+        # 注意：不要传 var-instance_id=All，原因同阿里 ECS
         return _build_url(uids["hw_ecs"], {
             "var-Env":          "All",
             "var-Product_Line": "All",
@@ -161,7 +163,6 @@ def _url_for(info: SchemaInfo) -> str:
             "var-private_ip_address": info.serverinnerip or "All",
             "var-public_ip_address":  "All",
             "var-name":         info.name or "All",
-            "var-instance_id":  "All",
         })
 
     # 未知类型：给个首页兜底
