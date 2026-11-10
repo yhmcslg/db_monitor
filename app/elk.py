@@ -29,9 +29,13 @@ def _rison_list(items: list[str]) -> str:
 
 
 def _rison_str(s: str) -> str:
-    """Rison 标量：只有字母数字下划线能裸写，其它字符（- * . 等）必须用单引号包起来。"""
+    """Rison 标量字面量。
+
+    按实际 Kibana 生成的 URL 观察，字母/数字/_/-/./: 都能裸写，*  '  !  ,  (  )  空格 等
+    才需要用单引号包起来。UUID (xxxx-xxxx) 也在裸写之列。
+    """
     import re as _re
-    if _re.fullmatch(r"[A-Za-z0-9_]+", s):
+    if _re.fullmatch(r"[A-Za-z0-9_\-.:]+", s):
         return s
     # rison 单引号字符串，内部的 ' 和 ! 要转义成 !' 和 !!
     escaped = s.replace("!", "!!").replace("'", "!'")
@@ -39,27 +43,29 @@ def _rison_str(s: str) -> str:
 
 
 def _pick_index(datacenter: str | None, product: str | None) -> str:
-    """按 datacenter + product 决定 ELK index pattern。
+    """按 datacenter + product 选 ELK index pattern UUID。
 
     规则：
-      datacenter=ALi   + product=WFM3 → ali-mssqlslowlog_p-*
-      datacenter=ALi   + 其他 product → ali-mysql_slow_log-*
-      datacenter=huawei + product=WFM3 → hw-mssqlslowlog_p-*
-      datacenter=huawei + 其他 product → hw-mysql_slow_log-*
-    不匹配时回退到 config.yaml 里的 kibana.index_pattern。
+      datacenter=ALi   + product=WFM3 → ali_mssql
+      datacenter=ALi   + 其他 product → ali_mysql
+      datacenter=huawei + product=WFM3 → hw_mssql
+      datacenter=huawei + 其他 product → hw_mysql
+    对应 UUID 从 config.yaml 的 kibana.index_uuids 读。
+    任意一步不匹配时回退到 kibana.index_pattern（兜底）。
     """
+    cfg = get_config()["kibana"]
+    uuids = cfg.get("index_uuids") or {}
+    fallback = cfg.get("index_pattern") or ""
+
     dc = (datacenter or "").strip().lower()
     prod = (product or "").strip().lower()
-    prefix = None
     if dc == "ali":
-        prefix = "ali"
+        key = "ali_mssql" if prod == "wfm3" else "ali_mysql"
     elif dc == "huawei":
-        prefix = "hw"
-    if prefix is None:
-        return get_config()["kibana"]["index_pattern"]
-    if prod == "wfm3":
-        return f"{prefix}-mssqlslowlog_p-*"
-    return f"{prefix}-mysql_slow_log-*"
+        key = "hw_mssql" if prod == "wfm3" else "hw_mysql"
+    else:
+        return fallback
+    return uuids.get(key) or fallback
 
 
 def _build_discover_path(users: list[str], index_id: str | None = None) -> str:
