@@ -28,13 +28,39 @@ def _rison_list(items: list[str]) -> str:
     return "!(" + ",".join(items) + ")"
 
 
-def _build_discover_path(users: list[str]) -> str:
+def _pick_index(datacenter: str | None, product: str | None) -> str:
+    """按 datacenter + product 决定 ELK index pattern。
+
+    规则：
+      datacenter=ALi   + product=WFM3 → ali-mssqlslowlog_p-*
+      datacenter=ALi   + 其他 product → ali-mysql_slow_log-*
+      datacenter=huawei + product=WFM3 → hw-mssqlslowlog_p-*
+      datacenter=huawei + 其他 product → hw-mysql_slow_log-*
+    不匹配时回退到 config.yaml 里的 kibana.index_pattern。
+    """
+    dc = (datacenter or "").strip().lower()
+    prod = (product or "").strip().lower()
+    prefix = None
+    if dc == "ali":
+        prefix = "ali"
+    elif dc == "huawei":
+        prefix = "hw"
+    if prefix is None:
+        return get_config()["kibana"]["index_pattern"]
+    if prod == "wfm3":
+        return f"{prefix}-mssqlslowlog_p-*"
+    return f"{prefix}-mysql_slow_log-*"
+
+
+def _build_discover_path(users: list[str], index_id: str | None = None) -> str:
     """生成 /app/discover#/?... 里 hash 之后的完整路径（未 urlencode 的原始形态）。
 
     users 对应 filter 里的 params 与 should 子句。
+    index_id 为空时回退到 config.yaml 里的默认 kibana.index_pattern。
     """
     cfg = get_config()["kibana"]
-    index_id = cfg["index_pattern"]
+    if not index_id:
+        index_id = cfg["index_pattern"]
     time_from = cfg["default_from"]
     time_to = cfg["default_to"]
 
@@ -70,9 +96,14 @@ def _build_discover_path(users: list[str]) -> str:
     return f"/app/discover#/?_g={g}&_a={a}"
 
 
-def build_long_url(users: list[str]) -> str:
+def build_long_url(
+    users: list[str],
+    datacenter: str | None = None,
+    product: str | None = None,
+) -> str:
     base = get_config()["kibana"]["base"].rstrip("/")
-    return base + _build_discover_path(users)
+    index_id = _pick_index(datacenter, product)
+    return base + _build_discover_path(users, index_id)
 
 
 def _looks_like_login_html(text: str) -> bool:
@@ -128,11 +159,16 @@ def _get_session(base: str, user: str, pwd: str, verify: bool) -> tuple[requests
         return s, None
 
 
-def build_short_url(users: list[str]) -> tuple[str, str | None]:
+def build_short_url(
+    users: list[str],
+    datacenter: str | None = None,
+    product: str | None = None,
+) -> tuple[str, str | None]:
     """返回 (final_url, error)。
 
     短链功能目前关闭（部署机器无法直接访问 ELK），直接返回长链，不走任何 API。
     error 固定为 None，上层 main.py 据此跳过"把长链 encode 展示"的分支。
     """
     base = get_config()["kibana"]["base"].rstrip("/")
-    return base + _build_discover_path(users), None
+    index_id = _pick_index(datacenter, product)
+    return base + _build_discover_path(users, index_id), None

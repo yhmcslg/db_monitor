@@ -28,7 +28,10 @@ def _lookup(tenant_code: str) -> dict:
     missing = [s for s in schemas if s not in found_names]
 
     grafana_links = build_grafana_links(infos)
-    elk_url, elk_err = build_short_url(schemas)
+    # 用第一条记录的 datacenter + product 决定 ELK index（WFM3 走 MSSQL，其他走 MySQL）
+    dc = infos[0].datacenter if infos else None
+    product = infos[0].product if infos else None
+    elk_url, elk_err = build_short_url(schemas, dc, product)
 
     screenshot_enabled = get_config().get("screenshot", {}).get("enabled", False)
 
