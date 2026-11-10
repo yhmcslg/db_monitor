@@ -52,25 +52,31 @@ def get_bot_info() -> dict:
 
 
 def is_bot_mentioned(body: dict) -> bool:
-    """判断消息里的 @ 列表里是否包含当前机器人。"""
+    """判断消息里的 @ 列表里是否包含当前机器人。
+
+    用 config.yaml 里的 feishu.app_id 与 mentions.id.app_id 比对，不走额外 API。
+    """
+    import sys
+    cfg = get_config().get("feishu", {})
+    my_app_id = (cfg.get("app_id") or "").strip()
     msg = (body.get("event") or {}).get("message") or {}
     mentions = msg.get("mentions") or []
+    print(f"[feishu] mention check: my_app_id={my_app_id} mentions={mentions}",
+          file=sys.stderr, flush=True)
     if not mentions:
         return False
-    try:
-        bot = get_bot_info()
-    except Exception as exc:  # noqa: BLE001
-        import sys
-        print(f"[feishu] get_bot_info failed, skip mention check: {exc}", file=sys.stderr)
-        return True  # 拿不到 bot 信息时就按原来的方式处理（宁可多回不漏回）
-    bot_open_id = bot.get("open_id") or ""
-    bot_app_id = bot.get("app_id") or ""
+    if not my_app_id:
+        # 配置里没填 app_id，无法判断，放行
+        print("[feishu] feishu.app_id not configured, bypass check",
+              file=sys.stderr, flush=True)
+        return True
     for m in mentions:
         mid = m.get("id") or {}
-        # id 结构： {"union_id": "...", "user_id": "...", "open_id": "...", "app_id": "..."}
-        if bot_open_id and mid.get("open_id") == bot_open_id:
-            return True
-        if bot_app_id and mid.get("app_id") == bot_app_id:
+        if isinstance(mid, str):
+            if mid == my_app_id:
+                return True
+            continue
+        if mid.get("app_id") == my_app_id:
             return True
     return False
 
