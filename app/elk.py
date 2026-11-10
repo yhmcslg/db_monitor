@@ -28,6 +28,16 @@ def _rison_list(items: list[str]) -> str:
     return "!(" + ",".join(items) + ")"
 
 
+def _rison_str(s: str) -> str:
+    """Rison 标量：只有字母数字下划线能裸写，其它字符（- * . 等）必须用单引号包起来。"""
+    import re as _re
+    if _re.fullmatch(r"[A-Za-z0-9_]+", s):
+        return s
+    # rison 单引号字符串，内部的 ' 和 ! 要转义成 !' 和 !!
+    escaped = s.replace("!", "!!").replace("'", "!'")
+    return f"'{escaped}'"
+
+
 def _pick_index(datacenter: str | None, product: str | None) -> str:
     """按 datacenter + product 决定 ELK index pattern。
 
@@ -64,6 +74,9 @@ def _build_discover_path(users: list[str], index_id: str | None = None) -> str:
     time_from = cfg["default_from"]
     time_to = cfg["default_to"]
 
+    # index 值在 rison 里如果包含 - * . 等非字母数字字符，必须用单引号包起来，
+    # 不然 Kibana 报 "rison decoder error: missing ':'"
+    index_rison = _rison_str(index_id)
     params_rison = _rison_list(users)
     should_rison = _rison_list([f"(match_phrase:(user:{u}))" for u in users])
 
@@ -77,7 +90,7 @@ def _build_discover_path(users: list[str], index_id: str | None = None) -> str:
         "filters:!("
             "('$state':(store:appState),"
             "meta:(alias:!n,disabled:!f,"
-                f"index:{index_id},"
+                f"index:{index_rison},"
                 "key:user,negate:!f,"
                 f"params:{params_rison},"
                 "type:phrases),"
@@ -86,7 +99,7 @@ def _build_discover_path(users: list[str], index_id: str | None = None) -> str:
             "))"
             ")"
         "),"
-        f"index:{index_id},"
+        f"index:{index_rison},"
         "interval:auto,"
         "query:(language:kuery,query:''),"
         "sort:!(!('@timestamp',desc)))"
