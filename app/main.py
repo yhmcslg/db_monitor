@@ -222,6 +222,16 @@ async def _handle_message(body: dict) -> None:
         lines.append("ELK 慢 SQL：")
         lines.append(data["elk"].get("display_url") or data["elk"]["url"])
         lines.append("")
+        lines.append("实例信息：")
+        for i in data.get("instances", []):
+            # 单库名 + 云 + 类型 + 内网地址 + name
+            inner = f"{i.get('serverinnerip','')}:{i.get('serverport','')}"
+            lines.append(
+                f"• {i.get('schemaname')} [{i.get('product')}] "
+                f"{i.get('datacenter')} / {i.get('instance_type')} "
+                f"{inner} ({i.get('name','')})"
+            )
+        lines.append("")
         lines.append("Grafana 监控：")
         for g in data["grafana"]:
             lines.append(f"• {g['instance_label']} [{g['instance_type']}]")
