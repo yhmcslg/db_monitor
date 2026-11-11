@@ -9,20 +9,20 @@
 
 缓存 1 小时。
 """
+from __future__ import annotations
 
 import logging as _logging
+import threading
+import time
+
 _logger = _logging.getLogger("db_monitor")
+
 
 def _log(msg: str) -> None:
     try:
         _logger.info(msg)
     except Exception:
         pass
-
-from __future__ import annotations
-
-import threading
-import time
 
 from .config import get_config
 
