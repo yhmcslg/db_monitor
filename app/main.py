@@ -269,6 +269,7 @@ async def _handle_message(body: dict) -> None:
                 lines.append(f"  {g['note']}")
             lines.append(f"  库：{' / '.join(g['schema_labels'])}")
             lines.append(f"  {g['url']}")
+            lines.append("")  # 每条链接后一个空行
         await asyncio.to_thread(fs.send_text, chat_id, "\n".join(lines))
 
         # 2. 每个实例一张截图
