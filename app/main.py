@@ -140,17 +140,20 @@ async def api_screenshot(
         return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}: {exc}"})
 
 
+import logging
+_logger = logging.getLogger("db_monitor")
+if not _logger.handlers:
+    _logger.setLevel(logging.INFO)
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _logger.addHandler(_h)
+    _logger.propagate = False
+
+
 def _log(msg: str) -> None:
-    """安全打印：Windows cmd 默认 GBK，中文/emoji 容易触发 UnicodeEncodeError，
-    这里强制按当前 stderr 编码 encode，无法编码的字符替换为 ?，避免整个 handler 500。"""
-    import sys
+    """走 logging 库，避免 Windows cmd 里 print 到 stderr 被各种吞。"""
     try:
-        sys.stderr.write(msg + "\n")
-        sys.stderr.flush()
-    except UnicodeEncodeError:
-        enc = getattr(sys.stderr, "encoding", None) or "utf-8"
-        sys.stderr.buffer.write(msg.encode(enc, errors="replace") + b"\n")
-        sys.stderr.flush()
+        _logger.info(msg)
     except Exception:
         pass
 
@@ -159,8 +162,6 @@ def _log(msg: str) -> None:
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
     import traceback
-    # 入口标记，不用 _log 兜底，直接 print 到 stdout 看最原始状态
-    print("[feishu] <<< enter webhook handler >>>", flush=True)
     # 整个 handler 外层 try：任何异常都返回 200，不让飞书重试打爆
     try:
         try:

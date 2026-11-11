@@ -30,16 +30,13 @@ _bot_info: dict | None = None
 _bot_info_ts: float = 0.0
 
 
+import logging as _logging
+_logger = _logging.getLogger("db_monitor")
+
+
 def _log(msg: str) -> None:
-    """安全打印：规避 Windows cmd GBK 编码不能打印中文/emoji 的问题。"""
-    import sys
     try:
-        sys.stderr.write(msg + "\n")
-        sys.stderr.flush()
-    except UnicodeEncodeError:
-        enc = getattr(sys.stderr, "encoding", None) or "utf-8"
-        sys.stderr.buffer.write(msg.encode(enc, errors="replace") + b"\n")
-        sys.stderr.flush()
+        _logger.info(msg)
     except Exception:
         pass
 
