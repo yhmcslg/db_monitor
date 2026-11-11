@@ -68,14 +68,35 @@ def _screenshot_key(link) -> str:
     return f"{link.instance_type}|{link.instance_label}"
 
 
-def _build_instance_card(g: dict, image_keys: list, screenshot_err: str | None) -> dict:
+def _build_instance_card(
+    g: dict,
+    image_keys: list,
+    screenshot_err: str | None,
+    *,
+    elk_url: str | None = None,
+    tenant: str | None = None,
+) -> dict:
     """为一个 Grafana 实例构造飞书消息卡片 JSON。
 
     g: 来自 _lookup 返回里的 grafana[] 单项
     image_keys: [(panel_name, image_key), ...]，可为空
     screenshot_err: 截图失败时的错误消息；无则 None
+    elk_url: 如果给了，就在卡片最顶部插入一行 "打开 ELK 慢 SQL" 超链接（通常第一张卡片带）
+    tenant: 如果给了，就在 ELK 行前面加 "租户：xxx"
     """
     elements: list = []
+
+    # 可选：顶部塞 ELK 链接 + 分割线（给第一张卡片）
+    if elk_url:
+        prefix = f"**租户：{tenant}**  " if tenant else ""
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"{prefix}[打开 ELK 慢 SQL]({elk_url})",
+            },
+        })
+        elements.append({"tag": "hr"})
 
     # note + Grafana 链接合成一行；标题已经在 header 显示
     note_part = g.get("note") or ("库：" + " / ".join(g.get("schema_labels") or []))
@@ -333,25 +354,8 @@ async def _handle_message(body: dict) -> None:
         # 查数据（同步，走线程池）
         data = await asyncio.to_thread(_lookup, tenant)
 
-        # 1. 头部卡片：租户 + ELK 慢 SQL 超链接
+        # ELK 链接会塞到第一张实例卡片的顶部，不再单独发消息
         elk_url = data["elk"].get("display_url") or data["elk"]["url"]
-        head_card = {
-            "config": {"wide_screen_mode": True},
-            "header": {
-                "template": "turquoise",
-                "title": {"tag": "plain_text", "content": f"租户：{tenant}"},
-            },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"[打开 ELK 慢 SQL]({elk_url})",
-                    },
-                },
-            ],
-        }
-        await asyncio.to_thread(fs.send_card, chat_id, head_card)
 
         screenshot_enabled = data.get("screenshot_enabled", False)
         if screenshot_enabled:
@@ -367,7 +371,8 @@ async def _handle_message(body: dict) -> None:
             infos = []
 
         # 2. 对每个实例：组装一张消息卡片（链接 + 多张大图）一次发送
-        for g in data["grafana"]:
+        # 第一张卡片顶部顺带带上 ELK 链接 + 分割线
+        for idx, g in enumerate(data["grafana"]):
             link = link_map.get(g["screenshot_key"]) if screenshot_enabled else None
             # 2.1 上传所有 panel 图，拿 image_key
             image_keys: list[tuple[str, str]] = []  # [(name, image_key), ...]
@@ -382,8 +387,12 @@ async def _handle_message(body: dict) -> None:
                     screenshot_err = f"{type(exc).__name__}: {exc}"
                     _log(traceback.format_exc())
 
-            # 2.2 组装卡片
-            card = _build_instance_card(g, image_keys, screenshot_err)
+            # 2.2 组装卡片。第一张卡片带上 ELK 链接 + 租户名
+            card = _build_instance_card(
+                g, image_keys, screenshot_err,
+                elk_url=elk_url if idx == 0 else None,
+                tenant=tenant if idx == 0 else None,
+            )
             await asyncio.to_thread(fs.send_card, chat_id, card)
     except Exception:  # noqa: BLE001
         _log("[feishu webhook error]\n" + traceback.format_exc())
