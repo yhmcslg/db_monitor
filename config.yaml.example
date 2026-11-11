@@ -1,14 +1,15 @@
-# 第一次用时：复制为 config.yaml，然后把 <填这里> 的位置补上
-#   cp config.yaml.example config.yaml      (Mac/Linux)
-#   copy config.yaml.example config.yaml    (Windows)
-# config.yaml 已被 .gitignore 忽略，不会提交到仓库。
+# 第一次使用：
+#   cp config.yaml.example config.yaml   (Mac/Linux)
+#   copy config.yaml.example config.yaml (Windows)
+# 然后把下面空的 "" 位置补上实际值。
+# config.yaml 已被 .gitignore 忽略，不会提交。
 
 # ========= MySQL（devops 元数据库） =========
 mysql:
-  host: 10.1.50.10
+  host: ""
   port: 3306
-  user: <填这里>
-  password: "<填这里>"
+  user: ""
+  password: ""
   database: devops
   # {schemas} 会被替换为逗号分隔的 4 个库名的带引号列表
   # 两表 join：tenant_info.schemaname → instance_info，按 number 关联
@@ -21,11 +22,15 @@ mysql:
     JOIN instance_info i ON t.number = i.number
     WHERE t.schemaname IN ({schemas})
 
+  # 阿里/华为 ECS 的 serverinnerip 可能是 VIP（集群）或 ECS 本身 IP（单机）。
+  # 查到的 IP 先用这条 SQL 匹配 vip 列：匹配到 → 用 masterip 代替；没匹配到 → 原样
+  havip_lookup_sql: "SELECT masterip FROM havip WHERE vip = %s LIMIT 1"
+
 # ========= Grafana =========
 grafana:
-  base: https://monitor.gaiaworkforce.com
-  username: <填这里>
-  password: <填这里>
+  base: ""
+  username: ""
+  password: ""
   # 默认时间窗（最近 1 小时）
   default_from: now-1h
   default_to: now
@@ -83,24 +88,70 @@ screenshot:
   headless: true
   # 本机内存缓存：同一 (tenant, instance_key) 多少秒内复用 PNG
   cache_ttl_sec: 60
+  # 浏览器通道。空=用 Playwright 自带的 chromium（headless_shell.exe）
+  # 遇到 "spawn UNKNOWN" / 杀软拦截时可改为：
+  #   chrome  → 用系统装的 Google Chrome
+  #   msedge  → 用系统自带的 Microsoft Edge（Windows 推荐）
+  channel: ""
 
 # ========= Kibana / ELK =========
 kibana:
-  base: https://elk-p.gaiaworks.cn
-  # Discover 使用的 index pattern id
-  index_pattern: c5f89b60-c3d7-11e9-9662-eb9202da844d
+  base: ""
+  # 兜底 index pattern id（当 datacenter/product 匹配不上时用）
+  index_pattern: ""
+  # 按 datacenter + product 选 index UUID。
+  # WFM3 产品用 MSSQL 慢日志；其它用 MySQL 慢日志。
+  index_uuids:
+    ali_mysql:   ""   # ali-mysql_slow_log-*
+    ali_mssql:   ""   # ali-mssqlslowlog_p-*
+    hw_mysql:    ""   # hw-mysql_slow_log-*
+    hw_mssql:    ""   # hw-mssqlslowlog_p-*
   default_from: now-1h
   default_to: now
-  # 短链 API 需要账号密码；留空则直接返回长链
-  username: "<填这里>"
-  password: "<填这里>"
-  # 请求头，大多数部署需要 kbn-xsrf
+  # Kibana 账号密码（只在短链功能启用时需要）
+  username: ""
+  password: ""
   verify_ssl: true
 
 # ========= Web 服务 =========
 server:
   host: 0.0.0.0
-  port: 8000
+  port: 5001
+
+# ========= 阿里云 Open API =========
+# 用来查 PolarDB 集群对应的 Writer 节点 ID，供 Grafana 变量使用
+# RAM 用户权限：AliyunPolarDBReadOnlyAccess 即可
+aliyun:
+  access_key_id: ""
+  access_key_secret: ""
+  region_id: cn-shanghai
+
+# ========= 华为云 Open API =========
+# 用来查 GaussDB(for MySQL)/TaurusDB 实例对应的 Master 节点 ID
+# IAM 子账号权限：GaussDB ReadOnlyAccess 即可
+# project_id 从 IAM → 我的凭证 → 项目列表 查看
+huaweicloud:
+  access_key_id: ""
+  access_key_secret: ""
+  region_id: ""
+  project_id: ""
+
+# ========= 飞书机器人 =========
+feishu:
+  # 从「开发者后台 → 凭证与基础信息」拿
+  app_id: ""
+  app_secret: ""
+  # 事件配置里的 Verification Token
+  verification_token: ""
+  # 本服务可外部访问的 base URL（给飞书下载截图用）
+  # 空则用 http://<server.host>:<server.port>
+  public_base_url: ""
+  # 识别"@了本机器人"的方式（三选一，优先级：open_id > name > 都空则按 mentioned_type=bot 放行）
+  # 1. 填 bot_open_id：从事件日志 mentions.id.open_id 复制（最精确）
+  # 2. 填 bot_name：机器人显示名，比如 "DB_Monitor"
+  # 3. 两个都空：群里只要 @ 到任意机器人就响应（群里只有一个机器人时最省事）
+  bot_open_id: ""
+  bot_name: ""
 
 # ========= 租户 -> 4 个库的推导规则 =========
 # {code} 会被替换为租户代码
