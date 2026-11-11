@@ -92,17 +92,46 @@ def _build_instance_card(g: dict, image_keys: list, screenshot_err: str | None) 
         "text": {"tag": "lark_md", "content": "\n".join(info_lines)},
     })
 
-    # 分割线 + 图片
+    # 分割线
     if image_keys or screenshot_err:
         elements.append({"tag": "hr"})
-    for name, key in image_keys:
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{name}**"}})
+
+    # 图片横排：每 3 张一行（用 column_set 列布局）
+    # 每列 width=weighted/weight=1 → 等宽均分
+    PER_ROW = 3
+    for start in range(0, len(image_keys), PER_ROW):
+        row = image_keys[start:start + PER_ROW]
+        columns = []
+        for name, key in row:
+            columns.append({
+                "tag": "column",
+                "width": "weighted",
+                "weight": 1,
+                "vertical_align": "top",
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": f"**{name}**"}},
+                    {
+                        "tag": "img",
+                        "img_key": key,
+                        "alt": {"tag": "plain_text", "content": name},
+                        "mode": "fit_horizontal",
+                        "preview": True,  # 点击弹大图
+                    },
+                ],
+            })
+        # 不足 3 张时补空列，保持宽度一致
+        while len(columns) < PER_ROW:
+            columns.append({
+                "tag": "column", "width": "weighted", "weight": 1,
+                "elements": [],
+            })
         elements.append({
-            "tag": "img",
-            "img_key": key,
-            "alt": {"tag": "plain_text", "content": name},
-            "mode": "fit_horizontal",
+            "tag": "column_set",
+            "flex_mode": "none",
+            "background_style": "default",
+            "columns": columns,
         })
+
     if screenshot_err:
         elements.append({
             "tag": "div",
