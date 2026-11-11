@@ -68,6 +68,60 @@ def _screenshot_key(link) -> str:
     return f"{link.instance_type}|{link.instance_label}"
 
 
+def _build_instance_card(g: dict, image_keys: list, screenshot_err: str | None) -> dict:
+    """为一个 Grafana 实例构造飞书消息卡片 JSON。
+
+    g: 来自 _lookup 返回里的 grafana[] 单项
+    image_keys: [(panel_name, image_key), ...]，可为空
+    screenshot_err: 截图失败时的错误消息；无则 None
+    """
+    elements: list = []
+
+    # 标题行：实例标签 + 类型 tag
+    note_md = f"**{g['instance_label']}**  `{g['instance_type']}`"
+    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": note_md}})
+
+    # note + 库信息
+    info_lines: list[str] = []
+    if g.get("note"):
+        info_lines.append(g["note"])
+    info_lines.append("库：" + " / ".join(g.get("schema_labels") or []))
+    info_lines.append(f"[打开 Grafana 面板]({g['url']})")
+    elements.append({
+        "tag": "div",
+        "text": {"tag": "lark_md", "content": "\n".join(info_lines)},
+    })
+
+    # 分割线 + 图片
+    if image_keys or screenshot_err:
+        elements.append({"tag": "hr"})
+    for name, key in image_keys:
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{name}**"}})
+        elements.append({
+            "tag": "img",
+            "img_key": key,
+            "alt": {"tag": "plain_text", "content": name},
+            "mode": "fit_horizontal",
+        })
+    if screenshot_err:
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"⚠️ 截图失败：{screenshot_err}"},
+        })
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "blue",
+            "title": {
+                "tag": "plain_text",
+                "content": f"{g['instance_label']}",
+            },
+        },
+        "elements": elements,
+    }
+
+
 def _encode_elk_long_url(url: str) -> str:
     """把 ELK discover 长链里会被客户端"识别超链接"截断的字符做百分号编码。
 
@@ -275,31 +329,25 @@ async def _handle_message(body: dict) -> None:
             link_map = {}
             infos = []
 
-        # 2. 对每个实例：先发链接文本，再发该实例的截图
+        # 2. 对每个实例：组装一张消息卡片（链接 + 多张大图）一次发送
         for g in data["grafana"]:
-            lines = [f"• {g['instance_label']} [{g['instance_type']}]"]
-            if g.get("note"):
-                lines.append(f"  {g['note']}")
-            lines.append(f"  库：{' / '.join(g['schema_labels'])}")
-            lines.append(f"  {g['url']}")
-            await asyncio.to_thread(fs.send_text, chat_id, "\n".join(lines))
+            link = link_map.get(g["screenshot_key"]) if screenshot_enabled else None
+            # 2.1 上传所有 panel 图，拿 image_key
+            image_keys: list[tuple[str, str]] = []  # [(name, image_key), ...]
+            screenshot_err: str | None = None
+            if screenshot_enabled and link is not None:
+                try:
+                    panels = await render_instance_panels(tenant, link, infos)
+                    for name, png in panels:
+                        key = await asyncio.to_thread(fs.upload_image, png)
+                        image_keys.append((name, key))
+                except Exception as exc:  # noqa: BLE001
+                    screenshot_err = f"{type(exc).__name__}: {exc}"
+                    _log(traceback.format_exc())
 
-            if not screenshot_enabled:
-                continue
-            link = link_map.get(g["screenshot_key"])
-            if link is None:
-                continue
-            try:
-                panels = await render_instance_panels(tenant, link, infos)
-                for _name, png in panels:
-                    image_key = await asyncio.to_thread(fs.upload_image, png)
-                    await asyncio.to_thread(fs.send_image, chat_id, image_key)
-            except Exception as exc:  # noqa: BLE001
-                await asyncio.to_thread(
-                    fs.send_text, chat_id,
-                    f"[{link.instance_label}] 截图失败：{type(exc).__name__}: {exc}",
-                )
-                _log(traceback.format_exc())
+            # 2.2 组装卡片
+            card = _build_instance_card(g, image_keys, screenshot_err)
+            await asyncio.to_thread(fs.send_card, chat_id, card)
     except Exception:  # noqa: BLE001
         _log("[feishu webhook error]\n" + traceback.format_exc())
 

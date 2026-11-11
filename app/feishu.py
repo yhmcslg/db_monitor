@@ -232,3 +232,17 @@ def send_image(chat_id: str, image_key: str) -> dict:
         },
         token,
     )
+
+
+def send_card(chat_id: str, card: dict) -> dict:
+    """发送交互式消息卡片。card 是一个 schema=2.0 的卡片 JSON。"""
+    token = get_tenant_access_token()
+    return _post(
+        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        {
+            "receive_id": chat_id,
+            "msg_type": "interactive",
+            "content": json.dumps(card, ensure_ascii=False),
+        },
+        token,
+    )
