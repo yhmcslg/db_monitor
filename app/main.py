@@ -77,19 +77,12 @@ def _build_instance_card(g: dict, image_keys: list, screenshot_err: str | None) 
     """
     elements: list = []
 
-    # 标题行：实例标签 + 类型 tag
-    note_md = f"**{g['instance_label']}**  `{g['instance_type']}`"
-    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": note_md}})
-
-    # note + 库信息
-    info_lines: list[str] = []
-    if g.get("note"):
-        info_lines.append(g["note"])
-    info_lines.append("库：" + " / ".join(g.get("schema_labels") or []))
-    info_lines.append(f"[打开 Grafana 面板]({g['url']})")
+    # note + Grafana 链接合成一行；标题已经在 header 显示
+    note_part = g.get("note") or ("库：" + " / ".join(g.get("schema_labels") or []))
+    one_line = f"{note_part}  [打开 Grafana 面板]({g['url']})"
     elements.append({
         "tag": "div",
-        "text": {"tag": "lark_md", "content": "\n".join(info_lines)},
+        "text": {"tag": "lark_md", "content": one_line},
     })
 
     # 分割线
@@ -144,7 +137,7 @@ def _build_instance_card(g: dict, image_keys: list, screenshot_err: str | None) 
             "template": "blue",
             "title": {
                 "tag": "plain_text",
-                "content": f"{g['instance_label']}",
+                "content": f"{g['instance_label']}  [{g['instance_type']}]",
             },
         },
         "elements": elements,
