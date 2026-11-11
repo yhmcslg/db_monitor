@@ -333,10 +333,25 @@ async def _handle_message(body: dict) -> None:
         # 查数据（同步，走线程池）
         data = await asyncio.to_thread(_lookup, tenant)
 
-        # 1. 头部消息：租户 + ELK 慢 SQL
-        head = [f"租户：{tenant}", "", "ELK 慢 SQL：",
-                data["elk"].get("display_url") or data["elk"]["url"]]
-        await asyncio.to_thread(fs.send_text, chat_id, "\n".join(head))
+        # 1. 头部卡片：租户 + ELK 慢 SQL 超链接
+        elk_url = data["elk"].get("display_url") or data["elk"]["url"]
+        head_card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": "turquoise",
+                "title": {"tag": "plain_text", "content": f"租户：{tenant}"},
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"[打开 ELK 慢 SQL]({elk_url})",
+                    },
+                },
+            ],
+        }
+        await asyncio.to_thread(fs.send_card, chat_id, head_card)
 
         screenshot_enabled = data.get("screenshot_enabled", False)
         if screenshot_enabled:
