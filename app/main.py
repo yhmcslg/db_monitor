@@ -159,6 +159,8 @@ def _log(msg: str) -> None:
 async def feishu_webhook(request: Request, background: BackgroundTasks):
     """飞书事件回调。需在飞书事件配置里填这个 URL。"""
     import traceback
+    # 入口标记，不用 _log 兜底，直接 print 到 stdout 看最原始状态
+    print("[feishu] <<< enter webhook handler >>>", flush=True)
     # 整个 handler 外层 try：任何异常都返回 200，不让飞书重试打爆
     try:
         try:
