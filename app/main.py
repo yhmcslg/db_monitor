@@ -88,12 +88,12 @@ def _build_instance_card(
 
     # 可选：顶部塞 ELK 链接 + 分割线（给第一张卡片）
     if elk_url:
-        prefix = f"**租户：{tenant}**  " if tenant else ""
+        tenant_line = f"**租户：{tenant}**\n" if tenant else ""
         elements.append({
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": f"{prefix}[打开 ELK 慢 SQL]({elk_url})",
+                "content": f"{tenant_line}所有库的 ELK 慢 SQL 地址：[打开 ELK 慢 SQL]({elk_url})",
             },
         })
         elements.append({"tag": "hr"})
