@@ -29,9 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # ------- 全局状态 -------
 
-_browser = None            # type: ignore[assignment]
-_playwright = None         # type: ignore[assignment]
-_browser_lock = asyncio.Lock()
+# {id(event_loop): (browser, playwright)}
+_browsers_by_loop: dict = {}
 _cache: dict[tuple[str, str], tuple[float, bytes]] = {}
 
 
@@ -165,23 +164,43 @@ def _wrap_single(link: GrafanaLink, panel_name: str, data: bytes, tenant: str) -
 # ------- Playwright 封装 -------
 
 async def _get_browser():
-    global _browser, _playwright
-    async with _browser_lock:
-        if _browser is None:
-            from playwright.async_api import async_playwright
-            _playwright = await async_playwright().start()
-            cfg_s = get_config()["screenshot"]
-            launch_args = {
-                "headless": cfg_s["headless"],
-                # 关掉沙箱，Windows 服务器 / Docker 常见，避免 spawn UNKNOWN
-                "args": ["--no-sandbox", "--disable-dev-shm-usage"],
-            }
-            # 可选：指定用系统 Chrome / Edge（当 bundled chromium 被杀软拦截时很有用）
-            channel = cfg_s.get("channel")
-            if channel:
-                launch_args["channel"] = channel
-            _browser = await _playwright.chromium.launch(**launch_args)
-        return _browser
+    """按当前 asyncio loop 缓存一个 Playwright Browser。
+
+    每次 FastAPI handler 从线程池里起一个新的 loop 调过来时，
+    不能复用别的 loop 创建的 Playwright 对象（会炸 "future attached to different loop"），
+    所以按 loop id 做 key 存一份。
+    """
+    import asyncio
+    global _browsers_by_loop
+    loop = asyncio.get_running_loop()
+    key = id(loop)
+    existing = _browsers_by_loop.get(key)
+    if existing is not None:
+        browser, _pw = existing
+        try:
+            if browser.is_connected():
+                return browser
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await _pw.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        _browsers_by_loop.pop(key, None)
+
+    from playwright.async_api import async_playwright
+    pw = await async_playwright().start()
+    cfg_s = get_config()["screenshot"]
+    launch_args = {
+        "headless": cfg_s["headless"],
+        "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+    }
+    channel = cfg_s.get("channel")
+    if channel:
+        launch_args["channel"] = channel
+    browser = await pw.chromium.launch(**launch_args)
+    _browsers_by_loop[key] = (browser, pw)
+    return browser
 
 
 async def _new_context():
@@ -651,10 +670,20 @@ def _compose(link: GrafanaLink, panel_pngs: list[tuple[str, bytes]], tenant: str
 # ------- 关闭 -------
 
 async def shutdown():
-    global _browser, _playwright
-    if _browser is not None:
-        await _browser.close()
-        _browser = None
-    if _playwright is not None:
-        await _playwright.stop()
-        _playwright = None
+    # 清理当前 loop 的 browser（跨 loop 清理会炸，只处理当前 loop）
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    entry = _browsers_by_loop.pop(id(loop), None)
+    if entry:
+        browser, pw = entry
+        try:
+            await browser.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            await pw.stop()
+        except Exception:  # noqa: BLE001
+            pass

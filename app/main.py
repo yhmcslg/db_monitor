@@ -204,7 +204,12 @@ async def feishu_webhook(request: Request, background: BackgroundTasks):
                 return {"ok": True}
             tenant = fs.extract_tenant_code(body)
             _log(f"[feishu] extracted tenant={tenant}")
-            background.add_task(_handle_message, body)
+            # 丢到独立线程里跑，避免阻塞 FastAPI 的 event loop
+            # （Playwright async 本身要 loop，所以在线程里用 asyncio.run 起新的 loop）
+            import threading
+            threading.Thread(
+                target=_handle_message_sync, args=(body,), daemon=True,
+            ).start()
         else:
             _log(f"[feishu] unknown event_type={event_type}, ignore")
     except Exception:  # noqa: BLE001
@@ -212,6 +217,19 @@ async def feishu_webhook(request: Request, background: BackgroundTasks):
         # 不让 FastAPI 把 500 返回给飞书，否则飞书会重试
         return {"ok": True}
     return {"ok": True}
+
+
+def _handle_message_sync(body: dict) -> None:
+    """在独立线程里跑：起一个新的 asyncio loop 执行 _handle_message。
+
+    这样一来 FastAPI 的主 event loop 不会被 Playwright/网络 IO 阻塞，
+    新事件来了依然能被 handler 接住。
+    """
+    import asyncio, traceback
+    try:
+        asyncio.run(_handle_message(body))
+    except Exception:  # noqa: BLE001
+        _log("[feishu] _handle_message_sync crashed:\n" + traceback.format_exc())
 
 
 async def _handle_message(body: dict) -> None:
