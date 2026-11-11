@@ -6,6 +6,16 @@
 
 缓存 1 小时，避免每张图都调用 Open API。
 """
+
+import logging as _logging
+_logger = _logging.getLogger("db_monitor")
+
+def _log(msg: str) -> None:
+    try:
+        _logger.info(msg)
+    except Exception:
+        pass
+
 from __future__ import annotations
 
 import threading
@@ -87,13 +97,13 @@ def get_ecs_instance_id(private_ip: str) -> str | None:
         resp = client.describe_instances(req)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[aliyun] DescribeInstances failed for '{private_ip}': {exc}", file=sys.stderr)
+        _log(f"[aliyun] DescribeInstances failed for '{private_ip}': {exc}")
         return None
 
     instances = ((resp.body.instances.instance if resp and resp.body and resp.body.instances else None) or [])
     if not instances:
         import sys
-        print(f"[aliyun] No ECS matches private ip '{private_ip}' (check region_id)", file=sys.stderr)
+        _log(f"[aliyun] No ECS matches private ip '{private_ip}' (check region_id)")
         return None
 
     iid = instances[0].instance_id
@@ -102,7 +112,7 @@ def get_ecs_instance_id(private_ip: str) -> str | None:
     with _cache_lock:
         _cache[f"ecs:{private_ip}"] = (now, iid)
     import sys
-    print(f"[aliyun] ECS ip '{private_ip}' -> instanceId={iid}", file=sys.stderr)
+    _log(f"[aliyun] ECS ip '{private_ip}' -> instanceId={iid}")
     return iid
 
 
@@ -135,14 +145,14 @@ def get_polardb_writer_node_id(cluster_description: str) -> str | None:
         resp = client.describe_dbclusters(req)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[aliyun] DescribeDBClusters failed for '{cluster_description}': {exc}", file=sys.stderr)
+        _log(f"[aliyun] DescribeDBClusters failed for '{cluster_description}': {exc}")
         return None
 
     items = (resp.body.items.dbcluster
              if resp and resp.body and resp.body.items else None) or []
     if not items:
         import sys
-        print(f"[aliyun] No cluster matches description '{cluster_description}'", file=sys.stderr)
+        _log(f"[aliyun] No cluster matches description '{cluster_description}'")
         return None
 
     # 精确匹配优先，拿不到就取第一个
@@ -156,7 +166,7 @@ def get_polardb_writer_node_id(cluster_description: str) -> str | None:
         resp2 = client.describe_dbcluster_attribute(req2)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[aliyun] DescribeDBClusterAttribute failed for '{cluster_id}': {exc}", file=sys.stderr)
+        _log(f"[aliyun] DescribeDBClusterAttribute failed for '{cluster_id}': {exc}")
         return None
 
     nodes = (resp2.body.dbnodes if resp2 and resp2.body else None) or []
@@ -169,11 +179,11 @@ def get_polardb_writer_node_id(cluster_description: str) -> str | None:
 
     if not writer:
         import sys
-        print(f"[aliyun] Writer node not found in cluster '{cluster_id}'", file=sys.stderr)
+        _log(f"[aliyun] Writer node not found in cluster '{cluster_id}'")
         return None
 
     with _cache_lock:
         _cache[cluster_description] = (now, writer)
     import sys
-    print(f"[aliyun] '{cluster_description}' -> cluster={cluster_id}, writer={writer}", file=sys.stderr)
+    _log(f"[aliyun] '{cluster_description}' -> cluster={cluster_id}, writer={writer}")
     return writer

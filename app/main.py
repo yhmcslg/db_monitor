@@ -134,9 +134,8 @@ async def api_screenshot(
         png = await render_instance_png(tenant, link, infos)
         return Response(content=png, media_type="image/png")
     except Exception as exc:  # noqa: BLE001
-        import traceback, sys
-        print(f"\n[screenshot error] tenant={tenant} key={key}", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+        import traceback
+        _log(f"[screenshot error] tenant={tenant} key={key}\n" + traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}: {exc}"})
 
 
@@ -238,8 +237,8 @@ async def _handle_message(body: dict) -> None:
     必须是 async：render_instance_png 用了全局 Playwright/Browser，
     必须跑在 FastAPI 本身的 event loop 里，不能 asyncio.run() 另起 loop。
     """
-    import sys, traceback, asyncio
-    print("[feishu] _handle_message started", file=sys.stderr, flush=True)
+    import traceback, asyncio
+    _log("[feishu] _handle_message started")
     try:
         from . import feishu as fs
         tenant = fs.extract_tenant_code(body)
@@ -294,10 +293,9 @@ async def _handle_message(body: dict) -> None:
                     fs.send_text, chat_id,
                     f"[{link.instance_label}] 截图失败：{type(exc).__name__}: {exc}",
                 )
-                traceback.print_exc(file=sys.stderr)
+                _log(traceback.format_exc())
     except Exception:  # noqa: BLE001
-        print("\n[feishu webhook error]", file=sys.stderr)
-        traceback.print_exc(file=sys.stderr)
+        _log("[feishu webhook error]\n" + traceback.format_exc())
 
 
 @app.on_event("shutdown")

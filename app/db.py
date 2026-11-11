@@ -1,8 +1,19 @@
 """查 devops.info 表，根据规则判定实例类型。"""
 from __future__ import annotations
 
+import logging as _logging
+
 from dataclasses import dataclass, asdict
 from typing import Literal
+
+_logger = _logging.getLogger("db_monitor")
+
+
+def _log(msg: str) -> None:
+    try:
+        _logger.info(msg)
+    except Exception:
+        pass
 
 from .config import get_config, derive_schemas
 
@@ -105,9 +116,9 @@ def query_schemas(tenant_code: str) -> list[SchemaInfo]:
             import sys
             for vip in ecs_ips:
                 if vip in vip_to_master:
-                    print(f"[havip] VIP {vip} -> master {vip_to_master[vip]}", file=sys.stderr)
+                    _log(f"[havip] VIP {vip} -> master {vip_to_master[vip]}")
                 else:
-                    print(f"[havip] VIP {vip} not found in havip table, keep as-is", file=sys.stderr)
+                    _log(f"[havip] VIP {vip} not found in havip table, keep as-is")
         else:
             vip_to_master = {}
     finally:
@@ -157,9 +168,9 @@ def _batch_lookup_masterip(cur, sql: str, ips: set[str]) -> dict[str, str]:
             except Exception:
                 pass
         except Exception as e:  # noqa: BLE001
-            print(f"[havip] query failed for {ip}: {e}", file=sys.stderr)
+            _log(f"[havip] query failed for {ip}: {e}")
             continue
-        print(f"[havip] query vip={ip!r} rows={n} row={row!r}", file=sys.stderr)
+        _log(f"[havip] query vip={ip!r} rows={n} row={row!r}")
         if not row:
             continue
         master = row.get("masterip") if isinstance(row, dict) else row[0]

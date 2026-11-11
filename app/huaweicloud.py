@@ -9,6 +9,16 @@
 
 缓存 1 小时。
 """
+
+import logging as _logging
+_logger = _logging.getLogger("db_monitor")
+
+def _log(msg: str) -> None:
+    try:
+        _logger.info(msg)
+    except Exception:
+        pass
+
 from __future__ import annotations
 
 import threading
@@ -97,15 +107,13 @@ def get_ecs_instance_id(name: str | None = None, private_ip: str | None = None) 
         resp = client.list_servers_details(req)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[huaweicloud] ListServersDetails failed (name={name}, ip={private_ip}): {exc}",
-              file=sys.stderr)
+        _log(f"[huaweicloud] ListServersDetails failed (name={name}, ip={private_ip}): {exc}")
         return None
 
     servers = (resp.servers if resp else None) or []
     if not servers:
         import sys
-        print(f"[huaweicloud] No ECS matches name='{name}' ip='{private_ip}' (check region_id)",
-              file=sys.stderr)
+        _log(f"[huaweicloud] No ECS matches name='{name}' ip='{private_ip}' (check region_id)")
         return None
 
     sid = getattr(servers[0], "id", None)
@@ -114,7 +122,7 @@ def get_ecs_instance_id(name: str | None = None, private_ip: str | None = None) 
     with _cache_lock:
         _cache[cache_key] = (now, sid)
     import sys
-    print(f"[huaweicloud] ECS (name={name}, ip={private_ip}) -> id={sid}", file=sys.stderr)
+    _log(f"[huaweicloud] ECS (name={name}, ip={private_ip}) -> id={sid}")
     return sid
 
 
@@ -146,7 +154,7 @@ def get_taurusdb_master_node_id(instance_name: str) -> str | None:
         resp = client.list_gauss_my_sql_instances(req)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[huaweicloud] ListGaussMySqlInstances failed for '{instance_name}': {exc}", file=sys.stderr)
+        _log(f"[huaweicloud] ListGaussMySqlInstances failed for '{instance_name}': {exc}")
         return None
 
     instances = (resp.instances if resp else None) or []
@@ -154,7 +162,7 @@ def get_taurusdb_master_node_id(instance_name: str) -> str | None:
     target = (exact or instances)[0] if (exact or instances) else None
     if target is None:
         import sys
-        print(f"[huaweicloud] No instance matches '{instance_name}'", file=sys.stderr)
+        _log(f"[huaweicloud] No instance matches '{instance_name}'")
         return None
 
     instance_id = getattr(target, "id", None)
@@ -167,7 +175,7 @@ def get_taurusdb_master_node_id(instance_name: str) -> str | None:
         resp2 = client.show_gauss_my_sql_instance_info(req2)
     except Exception as exc:  # noqa: BLE001
         import sys
-        print(f"[huaweicloud] ShowGaussMySqlInstanceInfo failed for '{instance_id}': {exc}", file=sys.stderr)
+        _log(f"[huaweicloud] ShowGaussMySqlInstanceInfo failed for '{instance_id}': {exc}")
         return None
 
     detail = resp2.instance if resp2 else None
@@ -185,11 +193,11 @@ def get_taurusdb_master_node_id(instance_name: str) -> str | None:
         import sys
         # 没 master 时打出节点 type 分布，方便 debug
         types = [getattr(n, "type", None) for n in nodes]
-        print(f"[huaweicloud] Master not found in '{instance_name}', node types={types}", file=sys.stderr)
+        _log(f"[huaweicloud] Master not found in '{instance_name}', node types={types}")
         return None
 
     with _cache_lock:
         _cache[instance_name] = (now, master_id)
     import sys
-    print(f"[huaweicloud] '{instance_name}' -> instance_id={instance_id}, master={master_id}", file=sys.stderr)
+    _log(f"[huaweicloud] '{instance_name}' -> instance_id={instance_id}, master={master_id}")
     return master_id
