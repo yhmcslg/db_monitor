@@ -257,34 +257,39 @@ async def _handle_message(body: dict) -> None:
         # 查数据（同步，走线程池）
         data = await asyncio.to_thread(_lookup, tenant)
 
-        # 1. 文本消息：Grafana 链接 + ELK 短链
-        lines = [f"租户：{tenant}", ""]
-        lines.append("ELK 慢 SQL：")
-        lines.append(data["elk"].get("display_url") or data["elk"]["url"])
-        lines.append("")
-        lines.append("Grafana 监控：")
+        # 1. 头部消息：租户 + ELK 慢 SQL
+        head = [f"租户：{tenant}", "", "ELK 慢 SQL：",
+                data["elk"].get("display_url") or data["elk"]["url"]]
+        await asyncio.to_thread(fs.send_text, chat_id, "\n".join(head))
+
+        screenshot_enabled = data.get("screenshot_enabled", False)
+        if screenshot_enabled:
+            from .db import query_schemas
+            from .grafana import build_grafana_links
+            from .screenshot import render_instance_panels
+            infos = await asyncio.to_thread(query_schemas, tenant.strip())
+            links_for_shot = build_grafana_links(infos)
+            # key: screenshot_key -> GrafanaLink 对象
+            link_map = {_screenshot_key(l): l for l in links_for_shot}
+        else:
+            link_map = {}
+            infos = []
+
+        # 2. 对每个实例：先发链接文本，再发该实例的截图
         for g in data["grafana"]:
-            lines.append(f"• {g['instance_label']} [{g['instance_type']}]")
+            lines = [f"• {g['instance_label']} [{g['instance_type']}]"]
             if g.get("note"):
                 lines.append(f"  {g['note']}")
             lines.append(f"  库：{' / '.join(g['schema_labels'])}")
             lines.append(f"  {g['url']}")
-            lines.append("")  # 每条链接后一个空行
-        await asyncio.to_thread(fs.send_text, chat_id, "\n".join(lines))
+            await asyncio.to_thread(fs.send_text, chat_id, "\n".join(lines))
 
-        # 2. 每个实例一张截图
-        if not data.get("screenshot_enabled"):
-            return
-
-        from .db import query_schemas
-        from .grafana import build_grafana_links
-        from .screenshot import render_instance_panels
-
-        infos = await asyncio.to_thread(query_schemas, tenant.strip())
-        links = build_grafana_links(infos)
-        for link in links:
+            if not screenshot_enabled:
+                continue
+            link = link_map.get(g["screenshot_key"])
+            if link is None:
+                continue
             try:
-                # 一个实例 N 张图，每张单独发，飞书不会把它压缩成竖条
                 panels = await render_instance_panels(tenant, link, infos)
                 for _name, png in panels:
                     image_key = await asyncio.to_thread(fs.upload_image, png)
