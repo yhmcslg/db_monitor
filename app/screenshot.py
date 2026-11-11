@@ -580,7 +580,7 @@ def _panel_vars(info: SchemaInfo) -> dict[str, str]:
             "var-Env": "All", "var-Product_Line": "All", "var-Server_Type": "All",
             "var-os_type": "All",
             "var-private_ip_address": info.serverinnerip or "All",
-            "var-public_ip_address": "All", "var-name": info.name or "All",
+            "var-public_ip_address": "All",
         }
     return {}
 

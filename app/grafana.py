@@ -155,6 +155,7 @@ def _url_for(info: SchemaInfo) -> str:
 
     if t == "hw_ecs":
         # 注意：不要传 var-instance_id=All，原因同阿里 ECS
+        # name 在很多主机上跟 Prometheus 实际 label 对不上，也不传，让 Grafana 用默认
         return _build_url(uids["hw_ecs"], {
             "var-Env":          "All",
             "var-Product_Line": "All",
@@ -162,7 +163,6 @@ def _url_for(info: SchemaInfo) -> str:
             "var-os_type":      "All",
             "var-private_ip_address": info.serverinnerip or "All",
             "var-public_ip_address":  "All",
-            "var-name":         info.name or "All",
         })
 
     # 未知类型：给个首页兜底
